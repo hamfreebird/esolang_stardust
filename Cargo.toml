@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.34.1"
+egui = "0.34.1"
+rfd = "0.14"
+egui_code_editor = "0.2"
 
 [build-dependencies]
 winresource = "0.1"

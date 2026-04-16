@@ -6,6 +6,7 @@ pub struct Lexer<'a> {
     chars: Peekable<Chars<'a>>,
     line: usize,
     column: usize,
+    byte_pos: usize, // 当前字节偏移
 }
 
 impl<'a> Lexer<'a> {
@@ -14,12 +15,14 @@ impl<'a> Lexer<'a> {
             chars: input.chars().peekable(),
             line: 1,
             column: 1,
+            byte_pos: 0,
         }
     }
 
     /// 消耗下一个字符并更新行列信息
     fn advance(&mut self) -> Option<char> {
         let ch = self.chars.next()?;
+        self.byte_pos += ch.len_utf8();
         if ch == '\n' {
             self.line += 1;
             self.column = 1;
@@ -57,12 +60,14 @@ impl<'a> Lexer<'a> {
                     match self.peek() {
                         Some(&ch) if is_symbol(ch) => {
                             let token_type = char_to_token_type(ch).unwrap();
+                            let byte_pos_of_symbol = self.byte_pos;
                             self.advance(); // 消耗符号
                             return Some(Ok(Token {
                                 spaces,
                                 token_type,
                                 line: start_line,
                                 column: start_col,
+                                byte_pos: byte_pos_of_symbol
                             }));
                         }
                         Some(_) => {
@@ -84,12 +89,14 @@ impl<'a> Lexer<'a> {
                 Some(&ch) if is_symbol(ch) => {
                     // 无前导空格的符号 token
                     let token_type = char_to_token_type(ch).unwrap();
+                    let byte_pos_of_symbol = self.byte_pos;
                     self.advance();
                     return Some(Ok(Token {
                         spaces: 0,
                         token_type,
                         line: start_line,
                         column: start_col,
+                        byte_pos: byte_pos_of_symbol
                     }));
                 }
 
@@ -143,15 +150,3 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, StardustError> {
     }
     Ok(tokens)
 }
-
-// pub fn tokenize(source: &str) -> Result<Vec<Token>, String> {
-//     let mut lexer = Lexer::new(source);
-//     let mut tokens = Vec::new();
-//     while let Some(token_result) = lexer.next_token() {
-//         match token_result {
-//             Ok(token) => tokens.push(token),
-//             Err(e) => return Err(e),
-//         }
-//     }
-//     Ok(tokens)
-// }

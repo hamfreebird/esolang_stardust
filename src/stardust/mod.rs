@@ -24,7 +24,7 @@ pub struct Token {
     pub token_type: TokenType,
     pub line: usize,            // 可选，用于错误报告
     pub column: usize,
-}
+    pub byte_pos: usize,}
 
 #[derive(Debug, Clone)]
 pub enum Instruction {

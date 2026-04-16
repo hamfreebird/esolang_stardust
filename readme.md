@@ -26,6 +26,7 @@
 ```bash
 stardust <file.stardust|file.sd>                 # 运行 Stardust 程序
 stardust --stardust <input.txt> [output]         # 将文本转化为可以打印该文本的 Stardust 源码
+stardust                                         # 不指定任何参数，将启动内置的IDE
 ```
 
 #### 模式一：运行 Stardust 程序
