@@ -136,6 +136,15 @@ impl VM {
             Instruction::Jump { name } if is_main => {
                 let target = *self.main_marks.get(&name)
                     .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name }))?;
+                if self.main_stack.len() >= 1 {
+                    self.pc = target;
+                } else {
+                    return Err(self.error(ErrorKind::JumpWhenStackAreNotZero));
+                }
+            }
+            Instruction::UnconditionalJump { name } if is_main => {
+                let target = *self.main_marks.get(&name)
+                    .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name }))?;
                 self.pc = target;
             }
             Instruction::Call { name, argc } if is_main => {
@@ -300,6 +309,15 @@ impl VM {
                 }
                 Instruction::Jump { name } => {
                     let target = *local_marks.get(name)
+                        .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
+                    if self.main_stack.len() >= 1 {
+                        local_pc = target;
+                    } else {
+                        return Err(self.error(ErrorKind::JumpWhenStackAreNotZero));
+                    }
+                }
+                Instruction::UnconditionalJump { name } => {
+                    let target = *self.main_marks.get(&name)
                         .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
                     local_pc = target;
                 }

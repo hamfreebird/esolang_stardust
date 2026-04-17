@@ -16,6 +16,15 @@ pub enum TokenType {
     Semicolon,  // ';'
     Dot,        // '.'
     Comma,      // ','
+    Hyphen,     // '-'
+    Equals,     // '='
+    AngleLeft,  // '<'
+    AngleRight, // '>'
+    Ampersand,  // '&'
+    Tilde,      // '~'
+    Hash,       // '#"
+    Annotation, // '//'
+
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -46,6 +55,9 @@ pub enum Instruction {
     Mark { name: usize },       // (n) `
     Jump { name: usize },       // (n) '
     Call { name: usize, argc: usize }, // (n1) : (n2) ;
+    // 危险操作
+    UnconditionalJump { name: usize ,} // (n) ~
+
 }
 
 #[derive(Debug)]
@@ -89,7 +101,6 @@ pub struct SourceSpan {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
-    // 词法错误
     InvalidCharacter { ch: char },
     NonSymbolicCharacter,
     TrailingSpaces,
@@ -116,6 +127,12 @@ pub enum ErrorKind {
     InvalidSpacesForComma { spaces: usize },
     InvalidInstructionContext,
     NotEnoughArguments { func: usize, expected: usize, actual: usize },
+    JumpWhenStackAreNotZero,
+    InvalidAnnotation,
+    // 其他阶段错误
+    ParseChar,
+    StdIoError,
+    CodePointTooLarge,
 }
 
 /// 完整的错误信息

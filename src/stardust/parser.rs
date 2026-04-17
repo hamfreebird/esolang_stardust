@@ -191,6 +191,7 @@ impl Parser {
             },
             TokenType::Backtick => return Ok(Instruction::Mark { name: spaces }),
             TokenType::Quote => return Ok(Instruction::Jump { name: spaces }),
+            TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces } ),
             _ => ErrorKind::UnexpectedToken {
                 expected: "instruction symbol".to_string(),
                 found: format!("{:?}", token.token_type),

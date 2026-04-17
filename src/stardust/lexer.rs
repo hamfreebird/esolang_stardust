@@ -70,6 +70,26 @@ impl<'a> Lexer<'a> {
                                 byte_pos: byte_pos_of_symbol
                             }));
                         }
+                        Some(&ch) if is_anno(ch) => {
+                            // 进入注释处理
+                            let token_type = char_to_token_type(ch).unwrap();
+                            self.advance();
+                            if token_type == TokenType::Annotation && (self.peek() == Some(&'/')){
+                                while let Some(&anno_ch) = self.peek() {
+                                    if anno_ch == '\n' {
+                                        break
+                                    };
+                                    self.advance();
+                                }
+                            } else {
+                                // 注释没有使用//，只使用了单个/
+                                let err = StardustError::new(
+                                    ErrorKind::InvalidAnnotation,
+                                    Some(span),
+                                );
+                                return Some(Err(err));
+                            }
+                        }
                         Some(_) => {
                             // 空格后跟了非符号字符（如字母、数字）
                             let err = StardustError::new(
@@ -85,7 +105,6 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-
                 Some(&ch) if is_symbol(ch) => {
                     // 无前导空格的符号 token
                     let token_type = char_to_token_type(ch).unwrap();
@@ -99,13 +118,31 @@ impl<'a> Lexer<'a> {
                         byte_pos: byte_pos_of_symbol
                     }));
                 }
-
+                Some(&ch) if is_anno(ch) => {
+                    // 进入注释处理
+                    let token_type = char_to_token_type(ch).unwrap();
+                    self.advance();
+                    if token_type == TokenType::Annotation && (self.peek() == Some(&'/')) {
+                        while let Some(&anno_ch) = self.peek() {
+                            if anno_ch == '\n' {
+                                break
+                            };
+                            self.advance();
+                        }
+                    } else {
+                        // 注释没有使用//，只使用了单个/
+                        let err = StardustError::new(
+                            ErrorKind::InvalidAnnotation,
+                            Some(span),
+                        );
+                        return Some(Err(err));
+                    }
+                }
                 Some(&ch) if ch.is_whitespace() => {
                     // 其他空白字符（\t \n \r）直接忽略
                     self.advance();
                     continue;
                 }
-
                 Some(&ch) if !is_symbol(ch) => {
                     let err = StardustError::new(
                         ErrorKind::InvalidCharacter { ch },
@@ -114,7 +151,6 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     return Some(Err(err));
                 }
-
                 None => return None, // EOF
                 _ => {}
             }
@@ -123,7 +159,12 @@ impl<'a> Lexer<'a> {
 }
 
 fn is_symbol(ch: char) -> bool {
-    matches!(ch, '+' | '*' | '`' | '\'' | ':' | ';' | '.' | ',')
+    matches!(ch, '+' | '*' | '`' | '\'' | ':' | ';' | '.' | ','
+    | '-' | '=' | '<' | '>' | '&' | '~' | '#')
+}
+
+fn is_anno(ch: char) -> bool {
+    matches!(ch, '/')
 }
 
 fn char_to_token_type(ch: char) -> Option<TokenType> {
@@ -136,6 +177,14 @@ fn char_to_token_type(ch: char) -> Option<TokenType> {
         ';' => Some(TokenType::Semicolon),
         '.' => Some(TokenType::Dot),
         ',' => Some(TokenType::Comma),
+        '-' => Some(TokenType::Hyphen),
+        '=' => Some(TokenType::Equals),
+        '<' => Some(TokenType::AngleLeft),
+        '>' => Some(TokenType::AngleRight),
+        '&' => Some(TokenType::Ampersand),
+        '~' => Some(TokenType::Tilde),
+        '#' => Some(TokenType::Hash),
+        '/' => Some(TokenType::Annotation),
         _ => None,
     }
 }

@@ -61,6 +61,13 @@ impl ErrorKind {
                     func, expected, actual
                 )
             }
+            ErrorKind::JumpWhenStackAreNotZero => "attempt a jump when the elements in the stack are not zero".to_string(),
+            ErrorKind::InvalidAnnotation => "invalid annotation, use '//'".to_string(),
+            _ => {
+                "unknown error\n\
+                这条消息面向开发者，对，说的就是你，freebird，你是不是忘了把错误类型加到default_message里了？？\n\
+                Ignore this error message. It's a problem with the interpreter itself".to_string()
+            }
         }
     }
 }

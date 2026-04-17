@@ -1,4 +1,6 @@
 pub mod stardust;
+pub mod extension;
+pub mod ide_py;
 
 use crate::stardust::lexer::tokenize;
 use crate::stardust::parser::parse_program;
@@ -12,7 +14,7 @@ use egui::Color32;
 use egui::TextFormat;
 use egui::panel::Panel;
 use egui_code_editor::Syntax;
-
+use crate::extension::unwind::{preprocess, simple_preprocess};
 // TODO:转译为Rust/C代码，实现编译为可执行文件
 
 fn main() -> Result<(), eframe::Error> {
@@ -103,28 +105,37 @@ impl MyApp {
     }
 
     fn run_code(&mut self) {
-        // 调用你的解释器执行 self.code
-        // 这里可以弹出新窗口显示输出，或者先在控制台打印
-        let tokens = match tokenize(&self.code) {
+        let unwind_source = match simple_preprocess(&self.code) {
+            Ok(uw) => uw,
+            Err(e) => {
+                print_error(&e, &self.code, "");
+                return;
+            }
+        };
+        println!("{}", unwind_source);
+
+        let tokens = match tokenize(&unwind_source) {
             Ok(toks) => toks,
             Err(e) => {
                 print_error(&e, &self.code, "");
-                process::exit(1);
+                return;
             }
         };
+        println!("{:?}", tokens);
 
         let parsed = match parse_program(tokens) {
             Ok(prog) => prog,
             Err(e) => {
                 print_error(&e, &self.code, "");
-                process::exit(1);
+                return;
             }
         };
+        println!("{:?}", parsed);
 
         let mut vm = VM::new(parsed);
         if let Err(e) = vm.run() {
             print_error(&e, &self.code, "");
-            process::exit(1);
+            return;
         }
     }
 }
@@ -205,6 +216,7 @@ pub fn token_format(token: &Token) -> TextFormat {
         TokenType::Semicolon => Color32::GRAY,
         TokenType::Dot => Color32::from_rgb(255, 255, 100),     // 黄色
         TokenType::Comma => Color32::LIGHT_GRAY,
+        _ => {Color32::WHITE}
     };
 
     TextFormat {
@@ -222,7 +234,6 @@ fn stardust_syntax() -> Syntax {
         quotes: Default::default(),
         hyperlinks: BTreeSet::new(),
         keywords: BTreeSet::from_iter([
-            // 根据你的词法分析器，定义各类 token
             "+", "*", "`", "'", ":", ";", ".", ",",
         ]),
         types: BTreeSet::new(),
@@ -285,9 +296,9 @@ fn stardust(args: Vec<String>) {
         return
     }
 
-    // 检查是否为编译模式
+    // 检查是否为字符转换模式
     if args[1] == "--stardust" || args[1] == "-s" {
-        // 编译模式
+        // 字符转换模式
         if args.len() < 3 || args.len() > 4 {
             print_usage(&args[0]);
             process::exit(1);
@@ -327,7 +338,15 @@ fn stardust(args: Vec<String>) {
         }
     };
 
-    let tokens = match tokenize(&source) {
+    let unwind_source = match preprocess(&source) {
+        Ok(uw) => uw,
+        Err(e) => {
+            print_error(&e, &source, filename);
+            process::exit(1);
+        }
+    };
+
+    let tokens = match tokenize(&unwind_source) {
         Ok(toks) => toks,
         Err(e) => {
             print_error(&e, &source, filename);
