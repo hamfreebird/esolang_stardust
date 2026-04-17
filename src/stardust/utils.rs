@@ -398,7 +398,9 @@ pub fn format_results(results: &[StageResult]) -> String {
 pub fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} <file.stardust|file.sd>           Run a Stardust program", program);
-    eprintln!("  {} --stardust <input.txt> [output]    Compile text file to Stardust code", program);
+    eprintln!("  {} --stardust <input.txt> [output]   Compile text file to Stardust code", program);
+    eprintln!("  {} --dump <input.stardust> [output]  Analyze a Stardust program and output analysis results", program);
+    eprintln!("  {}                                   Open Stardust IDE", program);
 }
 
 pub fn print_error(error: &StardustError, source: &str, filename: &str) {
