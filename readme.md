@@ -26,6 +26,7 @@
 ```bash
 stardust <file.stardust|file.sd>                 # 运行 Stardust 程序
 stardust --stardust <input.txt> [output]         # 将文本转化为可以打印该文本的 Stardust 源码
+stardust --dump <input.stardust> [output]        # 分析一个 Stardust 并输出分析结果
 stardust                                         # 不指定任何参数，将启动内置的 IDE，注意内置 IDE 暂不支持带可见 ASCII 字符源码的高亮
 ```
 
@@ -41,8 +42,7 @@ stardust hello.sd
 
 #### 模式二：文本 → Stardust 源码
 
-使用 `--stardust`（或 `-s`）将普通文本文件转换为可打印该文本的 Stardust 程序源码。
-或将 `.stardust` （或 `.sd`） 后缀的文件中除注释外的可见 ASCII 字符转换为对应的 Stardust 代码。
+使用 `--stardust`（或 `-s`）将带可见 ASCII 字符转换为 Stardust 代码，以便于进行编码
 
 ```bash
 stardust --stardust message.txt                 # 生成 message.stardust
@@ -51,9 +51,18 @@ stardust --stardust poem.txt output/poem.sd     # 指定输出路径
 
 不保证程序美观，生成的文件可直接用模式一执行，执行后将在终端输出原文本内容。
 
+#### 模式三：Stardust 源码分析
+
+使用 `--dump` ，生成程序的词法分析和语法分析等信息
+
+```bash
+stardust --dump code.stardust                               # 生成 code.stardust_dump
+stardust --dump code.stardust output/code.stardust_dump     # 指定输出路径
+```
+
 #### 文件扩展名要求
 
-- 解释模式仅接受 `.stardust` （或 `.sd`） 后缀。
+- 解释运行模式和分析模式仅接受 `.stardust` （或 `.sd`） 后缀。
 - 转换模式输入文件无限制，默认输出文件扩展名为 `.stardust`。
 
 > 为了方便输出文本和数字到终端，代码中的所有可见的 ASCII 字符都会被替换为对应的 Stardust 代码，将该字符的 ASCII 码压入栈中。
@@ -252,6 +261,9 @@ stardust --stardust poem.txt output/poem.sd     # 指定输出路径
 
 | 阶段       | 错误变体                                            | 错误描述                                                |
 |----------|-------------------------------------------------|-----------------------------------------------------|
+| **预处理**  | `ParseChar`                                     | 字符解析失败                                              |
+|          | `StdIoError`                                    | 被解释器错误系统捕获的系统 IO 错误                                 |
+|          | `CodePointTooLarge`                             | 字符的码点过大，无法转换为 Stardust 指令                           |
 | **词法分析** | `InvalidCharacter { ch }`                       | 出现无效字符 `ch`                                         |
 |          | `NonSymbolicCharacter`                          | 遇到非符号字符                                             |
 |          | `TrailingSpaces`                                | 行尾/文件末尾有空格但未跟随有效符号                                  |

@@ -2,19 +2,18 @@ pub mod stardust;
 pub mod extension;
 pub mod ide_py;
 
+use crate::extension::unwind::simple_preprocess;
 use crate::stardust::lexer::tokenize;
 use crate::stardust::parser::parse_program;
-use crate::stardust::utils::compile_file_to_stardust;
-use crate::stardust::{ErrorKind, StardustError, Token, TokenType, VM};
-use std::{env, fs, process};
-use std::collections::BTreeSet;
+use crate::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
+use crate::stardust::{Token, TokenType, VM};
 use eframe::egui;
+use egui::panel::Panel;
 use egui::text::LayoutJob;
 use egui::Color32;
 use egui::TextFormat;
-use egui::panel::Panel;
-use egui_code_editor::Syntax;
-use crate::extension::unwind::{preprocess, simple_preprocess};
+use std::{env, fs, process};
+
 // TODO:转译为Rust/C代码，实现编译为可执行文件
 
 fn main() -> Result<(), eframe::Error> {
@@ -25,9 +24,7 @@ fn main() -> Result<(), eframe::Error> {
     The code written in the IDE will be performed at this terminal window.\n\
     If you want to run the code separately, use the command line to run the\n\
     file that contains the stardust code directly\n\
-    Usage:\n\
-    |   stardust <file.stardust|file.sd>           Run a Stardust program\n\
-    |   stardust --stardust <input.txt> [output]   Compile text file to Stardust code\n\
+    Usage: stardust <file.stardust|file.sd>\n\
     When you use the Stardust IDE, a good way to determine the correct \n\
     syntax of the code is to see if the code is highlight, \n\
     the highlight of the IDE is based on the interpreter's tokenize.\n");
@@ -62,13 +59,6 @@ impl Default for MyApp {
 }
 
 impl MyApp {
-    fn new() -> Self {
-        Self {
-            code: String::new(),
-            tokens: Vec::new(),
-            current_file: None,
-        }
-    }
 
     fn update_tokens(&mut self) {
         match tokenize(&self.code) {
@@ -112,7 +102,6 @@ impl MyApp {
                 return;
             }
         };
-        println!("{}", unwind_source);
 
         let tokens = match tokenize(&unwind_source) {
             Ok(toks) => toks,
@@ -121,7 +110,6 @@ impl MyApp {
                 return;
             }
         };
-        println!("{:?}", tokens);
 
         let parsed = match parse_program(tokens) {
             Ok(prog) => prog,
@@ -130,7 +118,6 @@ impl MyApp {
                 return;
             }
         };
-        println!("{:?}", parsed);
 
         let mut vm = VM::new(parsed);
         if let Err(e) = vm.run() {
@@ -225,22 +212,6 @@ pub fn token_format(token: &Token) -> TextFormat {
     }
 }
 
-fn stardust_syntax() -> Syntax {
-    Syntax {
-        language: "stardust",
-        case_sensitive: true,
-        comment: ";",  // Stardust 中以分号开头的注释
-        comment_multiline: ["", ""],
-        quotes: Default::default(),
-        hyperlinks: BTreeSet::new(),
-        keywords: BTreeSet::from_iter([
-            "+", "*", "`", "'", ":", ";", ".", ",",
-        ]),
-        types: BTreeSet::new(),
-        special: BTreeSet::new(),
-    }
-}
-
 fn highlight(code: &str, tokens: &[Token]) -> LayoutJob {
     let mut job = LayoutJob::default();
     let mut last_byte = 0;
@@ -296,7 +267,6 @@ fn stardust(args: Vec<String>) {
         return
     }
 
-    // 检查是否为字符转换模式
     if args[1] == "--stardust" || args[1] == "-s" {
         // 字符转换模式
         if args.len() < 3 || args.len() > 4 {
@@ -307,15 +277,30 @@ fn stardust(args: Vec<String>) {
         let output_file = if args.len() == 4 { Some(args[3].as_str()) } else { None };
 
         if let Err(e) = compile_file_to_stardust(input_file, output_file) {
-            eprintln!("Compilation error: {}", e);
+            eprintln!("Transform error: {}", e);
             process::exit(1);
         }
-    }
-
-    // help模式
-    if args[1] == "--help" {
+    } else if args[1] == "--help" {
         print_usage(&args[0]);
         process::exit(0);
+    } else if args[1] == "--dump" {
+        // 分析输出功能
+        if args.len() < 3 || args.len() > 4 {
+            print_usage(&args[0]);
+            process::exit(1);
+        }
+        let input_file = &args[2];
+        let output_file = if args.len() == 4 { Some(args[3].as_str()) } else { None };
+
+        if !(input_file.ends_with(".stardust") || input_file.ends_with(".sd")) {
+            eprintln!("Error: File must have .stardust or .sd extension");
+            process::exit(1);
+        }
+
+        if let Err(e) = bump_source(input_file, output_file) {
+            eprintln!("Create error: {}", e);
+            process::exit(1);
+        }
     }
 
     // 解释执行模式
@@ -338,11 +323,11 @@ fn stardust(args: Vec<String>) {
         }
     };
 
-    let unwind_source = match preprocess(&source) {
+    let unwind_source = match simple_preprocess(&source) {
         Ok(uw) => uw,
         Err(e) => {
-            print_error(&e, &source, filename);
-            process::exit(1);
+            print_error(&e, &source, "");
+            return;
         }
     };
 
@@ -369,26 +354,4 @@ fn stardust(args: Vec<String>) {
     }
 
     process::exit(0);
-}
-
-fn print_usage(program: &str) {
-    eprintln!("Usage:");
-    eprintln!("  {} <file.stardust|file.sd>           Run a Stardust program", program);
-    eprintln!("  {} --stardust <input.txt> [output]    Compile text file to Stardust code", program);
-}
-
-fn print_error(error: &StardustError, source: &str, filename: &str) {
-    eprintln!("Error: {}", error.message);
-    if let Some(span) = &error.span {
-        eprintln!("  --> {}:{}:{}", filename, span.line, span.column);
-        // 打印源代码行
-        if let Some(line) = source.lines().nth(span.line - 1) {
-            eprintln!("   |");
-            eprintln!("{:3} | {}", span.line, line);
-            eprintln!("   | {}{}", " ".repeat(span.column - 1), "^");
-        }
-    }
-    if let ErrorKind::IoError { reason } = &error.kind {
-        eprintln!("  I/O details: {}", reason);
-    }
 }

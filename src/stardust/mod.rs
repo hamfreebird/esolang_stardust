@@ -31,7 +31,7 @@ pub enum TokenType {
 pub struct Token {
     pub spaces: usize,          // 前导空格数量
     pub token_type: TokenType,
-    pub line: usize,            // 可选，用于错误报告
+    pub line: usize,
     pub column: usize,
     pub byte_pos: usize,}
 
@@ -57,14 +57,13 @@ pub enum Instruction {
     Call { name: usize, argc: usize }, // (n1) : (n2) ;
     // 危险操作
     UnconditionalJump { name: usize ,} // (n) ~
-
 }
 
 #[derive(Debug)]
 pub struct ParseResult {
     pub main_instructions: Vec<Instruction>,
-    pub main_marks: HashMap<usize, usize>,      // mark name -> instruction index in main
-    pub functions: HashMap<usize, Vec<Instruction>>, // function name -> body instructions
+    pub main_marks: HashMap<usize, usize>,
+    pub functions: HashMap<usize, Vec<Instruction>>,
 }
 
 struct Parser {
@@ -129,7 +128,6 @@ pub enum ErrorKind {
     NotEnoughArguments { func: usize, expected: usize, actual: usize },
     JumpWhenStackAreNotZero,
     InvalidAnnotation,
-    // 其他阶段错误
     ParseChar,
     StdIoError,
     CodePointTooLarge,
@@ -141,4 +139,14 @@ pub struct StardustError {
     pub kind: ErrorKind,
     pub span: Option<SourceSpan>,
     pub message: String,
+}
+
+#[derive(Debug)]
+pub enum StageResult {
+    Source(String),
+    UnwindSource(String),
+    Tokens(Vec<Token>),
+    Parsed(ParseResult),
+    Error(String),
+    None,
 }

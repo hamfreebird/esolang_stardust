@@ -6,7 +6,7 @@ fn main() {
     res.set("FileDescription", "A Stardust language interpreter implemented in Rust");
     res.set("ProductName", "Stardust Language Interpreter");
     res.set("LegalCopyright", "copyright © 2026 freebird");
-    res.set("FileVersion", "0.1");
-    res.set("ProductVersion", "0.1");
+    res.set("FileVersion", "0.1.2");
+    res.set("ProductVersion", "0.1.2");
     res.compile().unwrap();
 }
