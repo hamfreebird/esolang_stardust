@@ -1,6 +1,6 @@
-pub mod stardust;
 pub mod extension;
 pub mod ide_py;
+pub mod stardust;
 
 use crate::extension::unwind::simple_preprocess;
 use crate::stardust::lexer::tokenize;
@@ -8,26 +8,30 @@ use crate::stardust::parser::parse_program;
 use crate::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
 use crate::stardust::{Token, TokenType, VM};
 use eframe::egui;
-use egui::panel::Panel;
-use egui::text::LayoutJob;
 use egui::Color32;
 use egui::TextFormat;
+use egui::panel::Panel;
+use egui::text::LayoutJob;
 use std::{env, fs, process};
 
 // TODO:转译为Rust/C代码，实现编译为可执行文件
+// TODO:分离IDE部分的代码
+// TODO:增加调试处理，单点执行
 
 fn main() -> Result<(), eframe::Error> {
     let args: Vec<String> = env::args().collect();
     stardust(args);
 
-    println!("You now open an Stardust IDE where you can write code and run it.\n\
+    println!(
+        "You now open an Stardust IDE where you can write code and run it.\n\
     The code written in the IDE will be performed at this terminal window.\n\
     If you want to run the code separately, use the command line to run the\n\
     file that contains the stardust code directly\n\
     Usage: stardust <file.stardust|file.sd>\n\
     When you use the Stardust IDE, a good way to determine the correct \n\
     syntax of the code is to see if the code is highlight, \n\
-    the highlight of the IDE is based on the interpreter's tokenize.\n");
+    the highlight of the IDE is based on the interpreter's tokenize.\n"
+    );
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([720.0, 480.0]),
@@ -36,9 +40,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "Stardust IDE",
         options,
-        Box::new(|cc| {
-            Ok(Box::<MyApp>::default())
-        }),
+        Box::new(|_cc| Ok(Box::<MyApp>::default())),
     )
 }
 
@@ -59,7 +61,6 @@ impl Default for MyApp {
 }
 
 impl MyApp {
-
     fn update_tokens(&mut self) {
         match tokenize(&self.code) {
             Ok(tokens) => self.tokens = tokens,
@@ -177,17 +178,18 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show_inside(ctx, |ui| {
             self.update_tokens(); // 更新语法高亮
             // 创建用于高亮的 layouter
-            let mut layouter = |ui: &egui::Ui, text_buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
-                // 从 TextBuffer 中获取 &str
-                let string = text_buffer.as_str();
-                let job = highlight(string, &self.tokens);
-                ui.fonts_mut(|fonts| fonts.layout_job(job))
-            };
+            let mut layouter =
+                |ui: &egui::Ui, text_buffer: &dyn egui::TextBuffer, _wrap_width: f32| {
+                    // 从 TextBuffer 中获取 &str
+                    let string = text_buffer.as_str();
+                    let job = highlight(string, &self.tokens);
+                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                };
             egui::TextEdit::multiline(&mut self.code)
                 .font(egui::TextStyle::Monospace)
                 .layouter(&mut layouter)
-                .desired_width(ui.available_width())   // 宽度填满
-                .desired_rows(10000)         // 高度尽可能大，但实际被面板限制
+                .desired_width(ui.available_width()) // 宽度填满
+                .desired_rows(10000) // 高度尽可能大，但实际被面板限制
                 .show(ui);
         });
     }
@@ -195,15 +197,15 @@ impl eframe::App for MyApp {
 
 pub fn token_format(token: &Token) -> TextFormat {
     let color = match token.token_type {
-        TokenType::Plus => Color32::from_rgb(100, 200, 255),   // 浅蓝
-        TokenType::Star => Color32::from_rgb(255, 160, 100),   // 橙色
+        TokenType::Plus => Color32::from_rgb(100, 200, 255), // 浅蓝
+        TokenType::Star => Color32::from_rgb(255, 160, 100), // 橙色
         TokenType::Backtick => Color32::from_rgb(200, 150, 255), // 淡紫
-        TokenType::Quote => Color32::from_rgb(255, 100, 100),   // 红色
-        TokenType::Colon => Color32::from_rgb(150, 255, 150),   // 浅绿
+        TokenType::Quote => Color32::from_rgb(255, 100, 100), // 红色
+        TokenType::Colon => Color32::from_rgb(150, 255, 150), // 浅绿
         TokenType::Semicolon => Color32::GRAY,
-        TokenType::Dot => Color32::from_rgb(255, 255, 100),     // 黄色
+        TokenType::Dot => Color32::from_rgb(255, 255, 100), // 黄色
         TokenType::Comma => Color32::LIGHT_GRAY,
-        _ => {Color32::WHITE}
+        _ => Color32::WHITE,
     };
 
     TextFormat {
@@ -264,7 +266,7 @@ fn highlight(code: &str, tokens: &[Token]) -> LayoutJob {
 
 fn stardust(args: Vec<String>) {
     if args.len() < 2 {
-        return
+        return;
     }
 
     if args[1] == "--stardust" || args[1] == "-s" {
@@ -274,7 +276,11 @@ fn stardust(args: Vec<String>) {
             process::exit(1);
         }
         let input_file = &args[2];
-        let output_file = if args.len() == 4 { Some(args[3].as_str()) } else { None };
+        let output_file = if args.len() == 4 {
+            Some(args[3].as_str())
+        } else {
+            None
+        };
 
         if let Err(e) = compile_file_to_stardust(input_file, output_file) {
             eprintln!("Transform error: {}", e);
@@ -290,7 +296,11 @@ fn stardust(args: Vec<String>) {
             process::exit(1);
         }
         let input_file = &args[2];
-        let output_file = if args.len() == 4 { Some(args[3].as_str()) } else { None };
+        let output_file = if args.len() == 4 {
+            Some(args[3].as_str())
+        } else {
+            None
+        };
 
         if !(input_file.ends_with(".stardust") || input_file.ends_with(".sd")) {
             eprintln!("Error: File must have .stardust or .sd extension");

@@ -1,5 +1,7 @@
+use crate::stardust::{
+    ErrorKind, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType,
+};
 use std::collections::HashMap;
-use crate::stardust::{ErrorKind, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType};
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
@@ -71,14 +73,13 @@ impl Parser {
         let name = self.current().unwrap().spaces;
         self.advance(); // 跳过第一个 colon
 
-        // 检查调用模式：下一个 token 是 Colon，再下一个是 Semicolon
+        // 检查调用模式：下一个 token 是 Semicolon
+        // TODO: 规则问题，在is_call_pattern中
         if self.is_call_pattern() {
-            // 函数调用
             let next = &self.tokens[self.pos];
             let argc = next.spaces;
-            // 调用消耗三个 token：Colon (第二个), Semicolon
             self.instructions.push(Instruction::Call { name, argc });
-            self.pos += 2; // 跳过第二个 Colon 和 Semicolon
+            self.pos += 1; // 跳过 Semicolon
             return Ok(());
         }
 
@@ -191,7 +192,7 @@ impl Parser {
             },
             TokenType::Backtick => return Ok(Instruction::Mark { name: spaces }),
             TokenType::Quote => return Ok(Instruction::Jump { name: spaces }),
-            TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces } ),
+            TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces }),
             _ => ErrorKind::UnexpectedToken {
                 expected: "instruction symbol".to_string(),
                 found: format!("{:?}", token.token_type),
