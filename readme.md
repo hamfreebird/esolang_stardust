@@ -27,7 +27,6 @@
 stardust <file.stardust|file.sd>                 # 运行 Stardust 程序
 stardust --stardust <input.txt> [output]         # 将文本转化为可以打印该文本的 Stardust 源码
 stardust --dump <input.stardust> [output]        # 分析一个 Stardust 并输出分析结果
-stardust                                         # 不指定任何参数，将启动内置的 IDE，注意内置 IDE 暂不支持带可见 ASCII 字符源码的高亮
 ```
 
 #### 模式一：运行 Stardust 程序
