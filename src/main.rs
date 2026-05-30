@@ -1,12 +1,8 @@
-pub mod extension;
-pub mod ide_py;
-pub mod stardust;
-
-use crate::extension::unwind::simple_preprocess;
-use crate::stardust::lexer::tokenize;
-use crate::stardust::parser::parse_program;
-use crate::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
-use crate::stardust::VM;
+use esolang_stardust::extension::unwind::simple_preprocess;
+use esolang_stardust::stardust::lexer::tokenize;
+use esolang_stardust::stardust::parser::parse_program;
+use esolang_stardust::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
+use esolang_stardust::stardust::VM;
 use std::{env, fs, process};
 
 // TODO:转译为Rust/C代码，实现编译为可执行文件

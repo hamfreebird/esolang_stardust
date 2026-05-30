@@ -330,9 +330,6 @@ impl VM {
                 Instruction::Call { .. } => {
                     return Err(self.error(ErrorKind::CallInsideFunction));
                 }
-                _ => {
-                    return Err(self.error(ErrorKind::InvalidInstructionContext));
-                }
             }
         }
 

@@ -35,7 +35,7 @@ pub struct Token {
     pub column: usize,
     pub byte_pos: usize,}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Push(i64),                  // (n >= 5) +  -> n-5
     Dup,                        // 1 +

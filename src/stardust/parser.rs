@@ -132,9 +132,6 @@ impl Parser {
                     return Err(self.error(ErrorKind::IncompleteFunctionCall));
                 }
                 let next = &self.tokens[self.pos];
-                if next.token_type != TokenType::Colon {
-                    return Err(self.error(ErrorKind::ExpectedColonInCall));
-                }
                 if next.token_type != TokenType::Semicolon {
                     return Err(self.error(ErrorKind::ExpectedSemicolonAfterCall));
                 }
@@ -216,4 +213,418 @@ impl Parser {
 
 pub fn parse_program(tokens: Vec<Token>) -> Result<ParseResult, StardustError> {
     Parser::new(tokens).parse()
+}
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stardust::TokenType;
+
+    fn tok(spaces: usize, tt: TokenType) -> Token {
+        Token { spaces, token_type: tt, line: 1, column: 1, byte_pos: 0 }
+    }
+
+    fn tok_at(spaces: usize, tt: TokenType, line: usize, col: usize) -> Token {
+        Token { spaces, token_type: tt, line, column: col, byte_pos: 0 }
+    }
+
+    fn colon(spaces: usize) -> Token { tok(spaces, TokenType::Colon) }
+    fn semicolon(spaces: usize) -> Token { tok(spaces, TokenType::Semicolon) }
+    fn plus(spaces: usize) -> Token { tok(spaces, TokenType::Plus) }
+    fn star(spaces: usize) -> Token { tok(spaces, TokenType::Star) }
+    fn dot(spaces: usize) -> Token { tok(spaces, TokenType::Dot) }
+    fn comma(spaces: usize) -> Token { tok(spaces, TokenType::Comma) }
+    fn backtick(spaces: usize) -> Token { tok(spaces, TokenType::Backtick) }
+    fn quote(spaces: usize) -> Token { tok(spaces, TokenType::Quote) }
+    fn tilde(spaces: usize) -> Token { tok(spaces, TokenType::Tilde) }
+
+    // ═══════════ 1. Push / 栈操作 (符号 +) ═══════════
+
+    #[test]
+    fn push_5_spaces_is_0() {
+        // 5空格+ → Push(5-5) = Push(0)
+        let result = parse_program(vec![plus(5)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Push(0)]);
+    }
+
+    #[test]
+    fn push_6_spaces_is_1() {
+        let result = parse_program(vec![plus(6)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Push(1)]);
+    }
+
+    #[test]
+    fn push_10_spaces_is_5() {
+        let result = parse_program(vec![plus(10)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Push(5)]);
+    }
+
+    #[test]
+    fn push_large_value() {
+        // Push(100) → 105 空格
+        let result = parse_program(vec![plus(105)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Push(100)]);
+    }
+
+    #[test]
+    fn dup_1_space_plus() {
+        let result = parse_program(vec![plus(1)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Dup]);
+    }
+
+    #[test]
+    fn swap_2_spaces_plus() {
+        let result = parse_program(vec![plus(2)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Swap]);
+    }
+
+    #[test]
+    fn rotate_3_spaces_plus() {
+        let result = parse_program(vec![plus(3)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Rotate]);
+    }
+
+    #[test]
+    fn pop_4_spaces_plus() {
+        let result = parse_program(vec![plus(4)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Pop]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_plus_0_spaces() {
+        let result = parse_program(vec![plus(0)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForPlus);
+    }
+
+    // ═══════════ 2. 算术运算 (符号 *) ═══════════
+
+    #[test]
+    fn add_0_star() {
+        let result = parse_program(vec![star(0)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Add]);
+    }
+
+    #[test]
+    fn sub_1_star() {
+        let result = parse_program(vec![star(1)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Sub]);
+    }
+
+    #[test]
+    fn mul_2_star() {
+        let result = parse_program(vec![star(2)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Mul]);
+    }
+
+    #[test]
+    fn div_3_star() {
+        let result = parse_program(vec![star(3)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Div]);
+    }
+
+    #[test]
+    fn mod_4_star() {
+        let result = parse_program(vec![star(4)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Mod]);
+    }
+
+    #[test]
+    fn reverse_5_star() {
+        let result = parse_program(vec![star(5)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Reverse]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_star_6() {
+        let result = parse_program(vec![star(6)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForStar { spaces: 6 });
+    }
+
+    // ═══════════ 3. I/O 指令 (符号 . 和 ,) ═══════════
+
+    #[test]
+    fn num_out_0_dot() {
+        let result = parse_program(vec![dot(0)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::NumOut]);
+    }
+
+    #[test]
+    fn num_in_1_dot() {
+        let result = parse_program(vec![dot(1)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::NumIn]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_dot_2() {
+        let result = parse_program(vec![dot(2)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForDot { spaces: 2 });
+    }
+
+    #[test]
+    fn char_out_0_comma() {
+        let result = parse_program(vec![comma(0)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::CharOut]);
+    }
+
+    #[test]
+    fn char_in_1_comma() {
+        let result = parse_program(vec![comma(1)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::CharIn]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_comma_2() {
+        let result = parse_program(vec![comma(2)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForComma { spaces: 2 });
+    }
+
+    // ═══════════ 4. 控制流 (符号 ` ' ~) ═══════════
+
+    #[test]
+    fn mark_with_name_0() {
+        let result = parse_program(vec![backtick(0)]).unwrap();
+        assert_eq!(result.main_marks.len(), 1);
+        assert!(result.main_marks.contains_key(&0));
+        match &result.main_instructions[0] {
+            Instruction::Mark { name, .. } => assert_eq!(*name, 0),
+            _ => panic!("expected Mark"),
+        }
+    }
+
+    #[test]
+    fn mark_with_name_5() {
+        let result = parse_program(vec![backtick(5)]).unwrap();
+        assert_eq!(result.main_marks.len(), 1);
+        match &result.main_instructions[0] {
+            Instruction::Mark { name, .. } => assert_eq!(*name, 5),
+            _ => panic!("expected Mark"),
+        }
+    }
+
+    #[test]
+    fn jump_with_name_3() {
+        let result = parse_program(vec![quote(3)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Jump { name: 3 }]);
+    }
+
+    #[test]
+    fn unconditional_jump() {
+        let result = parse_program(vec![tilde(7)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::UnconditionalJump { name: 7 }]);
+    }
+
+    // ═══════════ 5. 重复标志错误 ═══════════
+
+    #[test]
+    fn duplicate_mark_error() {
+        let result = parse_program(vec![backtick(1), backtick(1)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::DuplicateMark { name: 1 });
+    }
+
+    #[test]
+    fn multiple_different_marks() {
+        let result = parse_program(vec![backtick(1), backtick(2), backtick(3)]).unwrap();
+        assert_eq!(result.main_marks.len(), 3);
+    }
+
+    // ═══════════ 6. 函数声明 ═══════════
+
+    #[test]
+    fn simple_function_declaration() {
+        // (1): Push(0) CharOut (1):
+        let tokens = vec![
+            colon(1),
+            plus(5),    // Push(0)
+            comma(0),   // CharOut
+            colon(1),   // 结束标志
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.functions.len(), 1);
+        assert!(result.functions.contains_key(&1));
+        let body = &result.functions[&1];
+        assert_eq!(body.len(), 2);
+        assert_eq!(body[0], Instruction::Push(0));
+        assert_eq!(body[1], Instruction::CharOut);
+        assert!(result.main_instructions.is_empty());
+    }
+
+    #[test]
+    fn function_with_mark_and_jump() {
+        // (2): Push(1) 0` 0' Push(0) CharOut (2):
+        let tokens = vec![
+            colon(2),
+            plus(6),     // Push(1)
+            backtick(0), // Mark(0)
+            quote(0),    // Jump(0) — loops until stack empty
+            plus(5),     // Push(0)
+            comma(0),    // CharOut
+            colon(2),
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.functions.len(), 1);
+        assert!(result.functions.contains_key(&2));
+        assert_eq!(result.functions[&2].len(), 5);
+    }
+
+    #[test]
+    fn duplicate_function_error() {
+        let tokens = vec![
+            colon(1), plus(5), colon(1),
+            colon(1), plus(6), colon(1),
+        ];
+        let result = parse_program(tokens);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::DuplicateFunction { name: 1 });
+    }
+
+    #[test]
+    fn unclosed_function_error() {
+        // 函数声明没有匹配的结束 colon
+        let tokens = vec![
+            colon(1),
+            plus(5),
+            // 缺少 colon(1) 结束
+        ];
+        let result = parse_program(tokens);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::UnclosedFunction { name: 1 });
+    }
+
+    #[test]
+    fn function_with_nested_call_is_allowed_by_parser() {
+        // Parser 允许函数体内出现调用语法（Colon + Semicolon）
+        // VM 运行时会拒绝（CallInsideFunction 错误由 VM 检查）
+        let tokens = vec![
+            colon(1),
+            colon(2), semicolon(3),  // Call(name=2, argc=3) — 函数体内调用
+            colon(1),
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.functions.len(), 1);
+        let body = &result.functions[&1];
+        assert_eq!(body.len(), 1);
+        assert_eq!(body[0], Instruction::Call { name: 2, argc: 3 });
+    }
+
+    // ═══════════ 7. 函数调用 (顶层) ═══════════
+
+    #[test]
+    fn function_call_at_top_level() {
+        // (3): (2);  →  Call(name=3, argc=2)
+        let tokens = vec![
+            colon(3),
+            semicolon(2),
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions.len(), 1);
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 3, argc: 2 });
+    }
+
+    #[test]
+    fn function_call_with_zero_args() {
+        // (1): (0);
+        let tokens = vec![
+            colon(1),
+            semicolon(0),
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0 });
+    }
+
+    #[test]
+    fn function_declaration_then_call() {
+        // 声明函数1: Push(0) CharOut ; 然后调用它: (1): (0);
+        let tokens = vec![
+            colon(1), plus(5), comma(0), colon(1),  // 函数声明
+            colon(1), semicolon(0),                  // 函数调用
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.functions.len(), 1);
+        assert_eq!(result.main_instructions.len(), 1);
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0 });
+    }
+
+    // ═══════════ 8. 混合指令 ═══════════
+
+    #[test]
+    fn multiple_instructions_sequence() {
+        let tokens = vec![
+            plus(5),     // Push(0)
+            plus(5),     // Push(0)
+            star(0),     // Add
+            dot(0),      // NumOut
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions.len(), 4);
+    }
+
+    #[test]
+    fn hello_world_style_sequence() {
+        // Push(72) CharOut → 'H'
+        let tokens = vec![
+            plus(77),   // Push(72)
+            comma(0),   // CharOut
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions[0], Instruction::Push(72));
+        assert_eq!(result.main_instructions[1], Instruction::CharOut);
+    }
+
+    #[test]
+    fn mark_then_jump_then_unconditional_jump() {
+        let tokens = vec![
+            backtick(0),  // Mark(0)
+            plus(5),      // Push(0)
+            quote(0),     // Jump(0) — 条件跳转
+            tilde(0),     // UncondJump(0)
+        ];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions.len(), 4);
+        assert_eq!(result.main_marks.len(), 1);
+        assert!(result.main_marks.contains_key(&0));
+    }
+
+    // ═══════════ 9. 空程序 ═══════════
+
+    #[test]
+    fn empty_program() {
+        let result = parse_program(vec![]).unwrap();
+        assert!(result.main_instructions.is_empty());
+        assert!(result.main_marks.is_empty());
+        assert!(result.functions.is_empty());
+    }
+
+    // ═══════════ 10. 参数个数 = Semicolon 的前导空格数 ═══════════
+
+    #[test]
+    fn call_argc_from_semicolon_spaces() {
+        // (0): (3);  调用 name=0, argc=3
+        let tokens = vec![colon(0), semicolon(3)];
+        let result = parse_program(tokens).unwrap();
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 0, argc: 3 });
+    }
+
+    // ═══════════ 11. Mark 中的 SourceSpan ═══════════
+
+    #[test]
+    fn mark_stores_source_position() {
+        let t = tok_at(1, TokenType::Backtick, 5, 10);
+        let result = parse_program(vec![t]).unwrap();
+        match &result.main_instructions[0] {
+            Instruction::Mark { name: 1, span } => {
+                assert_eq!(span.line, 5);
+                assert_eq!(span.column, 10);
+            }
+            _ => panic!("expected Mark with span"),
+        }
+    }
 }

@@ -91,6 +91,11 @@ impl<'a> Lexer<'a> {
                                 return Some(Err(err));
                             }
                         }
+                        Some(&ch) if ch.is_whitespace() => {
+                            // 空格后遇到换行/制表符等 → 丢弃前导空格，在下一轮处理
+                            spaces = 0;
+                            continue;
+                        }
                         Some(_) => {
                             // 空格后跟了非符号字符（如字母、数字）
                             let err =
@@ -910,6 +915,36 @@ mod tests {
         let tokens = collect_all(":");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0], tok(0, TokenType::Colon, 1, 1, 0));
+    }
+
+    #[test]
+    fn test_spaces_followed_by_newline_ignored() {
+        // 前导空格后跟换行符 → 不产生 token，空格被忽略
+        let tokens = collect_all("   \n+");
+        assert_eq!(tokens.len(), 1);
+        // lexer 的 line/col 记录函数入口位置，byte_pos 记录符号位置
+        assert_eq!(tokens[0].spaces, 0);
+        assert_eq!(tokens[0].token_type, TokenType::Plus);
+        assert_eq!(tokens[0].byte_pos, 4);
+    }
+
+    #[test]
+    fn test_spaces_followed_by_tab_ignored() {
+        // 前导空格后跟制表符 → 不产生 token
+        let tokens = collect_all("  \t+");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].spaces, 0);
+        assert_eq!(tokens[0].token_type, TokenType::Plus);
+    }
+
+    #[test]
+    fn test_multiple_lines_with_only_spaces() {
+        // 多行只有空格，不产生 token
+        let source = "   \n  \n +\n";
+        let tokens = collect_all(source);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].spaces, 1);
+        assert_eq!(tokens[0].token_type, TokenType::Plus);
     }
 
     #[test]
