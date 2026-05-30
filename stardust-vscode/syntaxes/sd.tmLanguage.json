@@ -1,0 +1,73 @@
+{
+    "name": "Stardust",
+    "scopeName": "source.sd",
+    "fileTypes": [".sd", ".stardust"],
+    "patterns": [
+        {
+            "name": "comment.line.double-slash.sd",
+            "begin": "//",
+            "end": "$",
+            "comment": "注释: // 到行尾"
+        },
+        {
+            "name": "keyword.operator.plus.sd",
+            "match": "\\+",
+            "comment": "Push/Dup/Swap/Rotate/Pop 指令组 (+符号)"
+        },
+        {
+            "name": "keyword.operator.star.sd",
+            "match": "\\*",
+            "comment": "Add/Sub/Mul/Div/Mod/Reverse 指令组 (*符号)"
+        },
+        {
+            "name": "keyword.control.backtick.sd",
+            "match": "`",
+            "comment": "Mark 标记声明 (`符号)"
+        },
+        {
+            "name": "keyword.control.quote.sd",
+            "match": "'",
+            "comment": "条件跳转 Jump ('符号)"
+        },
+        {
+            "name": "keyword.control.tilde.sd",
+            "match": "~",
+            "comment": "无条件跳转 UnconditionalJump (~符号)"
+        },
+        {
+            "name": "entity.name.function.sd",
+            "match": ":",
+            "comment": "函数声明/调用分隔符 (:符号)"
+        },
+        {
+            "name": "entity.name.tag.sd",
+            "match": ";",
+            "comment": "函数调用参数个数分隔符 (;符号)"
+        },
+        {
+            "name": "support.function.sd",
+            "match": "\\.",
+            "comment": "NumOut/NumIn I/O指令 (.符号)"
+        },
+        {
+            "name": "support.type.sd",
+            "match": ",",
+            "comment": "CharOut/CharIn I/O指令 (,符号)"
+        },
+        {
+            "name": "keyword.other.hash.sd",
+            "match": "#",
+            "comment": "Hash 符号（保留备用）"
+        },
+        {
+            "name": "keyword.other.operator.sd",
+            "match": "[\\-=&<>]",
+            "comment": "比较/赋值符号（保留备用）"
+        },
+        {
+            "name": "invalid.illegal.sd",
+            "match": "[^\\+\\*`':;\\.\\,~#\\-=&<>/ \\t\\n\\r]",
+            "comment": "非法字符（字母、数字等非符号字符）"
+        }
+    ]
+}

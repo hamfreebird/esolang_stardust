@@ -1,0 +1,92 @@
+{
+    "name": "stardust",
+    "displayName": "Stardust Language Support",
+    "description": "Syntax highlighting, diagnostics, and run support for the Stardust esolang",
+    "version": "0.1.0",
+    "publisher": "freebird",
+    "license": "MIT",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "activationEvents": [
+        "onLanguage:sd"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "languages": [
+            {
+                "id": "sd",
+                "aliases": ["Stardust", "sd", "stardust"],
+                "extensions": [".sd", ".stardust"],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "sd",
+                "scopeName": "source.sd",
+                "path": "./syntaxes/sd.tmLanguage.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "stardust.run",
+                "title": "Stardust: Run current file"
+            },
+            {
+                "command": "stardust.check",
+                "title": "Stardust: Check syntax"
+            },
+            {
+                "command": "stardust.compile",
+                "title": "Stardust: Compile text file to Stardust"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "stardust.run",
+                "key": "f5",
+                "when": "editorLangId == sd"
+            },
+            {
+                "command": "stardust.check",
+                "key": "ctrl+shift+c",
+                "when": "editorLangId == sd"
+            }
+        ],
+        "configuration": {
+            "title": "Stardust",
+            "properties": {
+                "stardust.cliPath": {
+                    "type": "string",
+                    "default": "stardust",
+                    "description": "Path to the Stardust CLI binary"
+                },
+                "stardust.runInTerminal": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Run programs in the integrated terminal (true) or output panel (false)"
+                },
+                "stardust.checkOnSave": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Run syntax check automatically on save"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    }
+}

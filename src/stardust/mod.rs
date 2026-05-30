@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use serde::Serialize;
 
 pub mod lexer;
 pub mod parser;
@@ -6,7 +7,7 @@ pub mod vm;
 pub mod utils;
 pub mod error;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum TokenType {
     Plus,       // '+'
     Star,       // '*'
@@ -27,7 +28,7 @@ pub enum TokenType {
 
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Token {
     pub spaces: usize,          // 前导空格数量
     pub token_type: TokenType,
@@ -35,7 +36,7 @@ pub struct Token {
     pub column: usize,
     pub byte_pos: usize,}
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Instruction {
     Push(i64),                  // (n >= 5) +  -> n-5
     Dup,                        // 1 +
@@ -59,7 +60,7 @@ pub enum Instruction {
     UnconditionalJump { name: usize ,} // (n) ~
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ParseResult {
     pub main_instructions: Vec<Instruction>,
     pub main_marks: HashMap<usize, usize>,
@@ -92,13 +93,13 @@ pub struct VM {
 }
 
 /// 源代码位置信息
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SourceSpan {
     pub line: usize,
     pub column: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ErrorKind {
     InvalidCharacter { ch: char },
     NonSymbolicCharacter,
@@ -134,7 +135,7 @@ pub enum ErrorKind {
 }
 
 /// 完整的错误信息
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StardustError {
     pub kind: ErrorKind,
     pub span: Option<SourceSpan>,

@@ -398,9 +398,11 @@ pub fn format_results(results: &[StageResult]) -> String {
 pub fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} <file.stardust|file.sd>           Run a Stardust program", program);
-    eprintln!("  {} --stardust <input.txt> [output]   Compile test file to Stardust code", program);
-    eprintln!("  {} --dump <input.stardust> [output]  Analyze a Stardust program and output analysis results", program);
-    eprintln!("  {}                                   Open Stardust IDE", program);
+    eprintln!("  {} --check <file.sd>                 Check syntax, output JSON diagnostics", program);
+    eprintln!("  {} --tokens <file.sd>                Output token stream as JSON", program);
+    eprintln!("  {} --stardust <input.txt> [output]   Compile text file to Stardust code", program);
+    eprintln!("  {} --dump <file.sd> [output]         Analyze and dump all pipeline stages", program);
+    eprintln!("  {} --help                            Show this help", program);
 }
 
 pub fn print_error(error: &StardustError, source: &str, filename: &str) {
