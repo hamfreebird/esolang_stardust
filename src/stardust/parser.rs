@@ -74,12 +74,10 @@ impl Parser {
         self.advance(); // 跳过第一个 colon
 
         // 检查调用模式：下一个 token 是 Semicolon
-        // TODO: 规则问题，在is_call_pattern中
         if self.is_call_pattern() {
-            let next = &self.tokens[self.pos];
-            let argc = next.spaces;
+            let argc = self.tokens[self.pos].spaces;  // Semicolon 的 spaces = n2 = 参数个数
             self.instructions.push(Instruction::Call { name, argc });
-            self.pos += 1; // 跳过 Semicolon
+            self.pos += 1;  // 跳过 Semicolon
             return Ok(());
         }
 
@@ -113,12 +111,10 @@ impl Parser {
 
     /// 检查当前位置开始是否构成调用模式：Colon (任意空格) + Semicolon
     fn is_call_pattern(&self) -> bool {
-        if self.pos + 1 >= self.tokens.len() {
+        if self.pos >= self.tokens.len() {
             return false;
         }
-        let next = &self.tokens[self.pos];
-        let next2 = &self.tokens[self.pos + 1];
-        next.token_type == TokenType::Colon && next2.token_type == TokenType::Semicolon
+        self.tokens[self.pos].token_type == TokenType::Semicolon
     }
 
     /// 在函数体内解析一条指令
@@ -130,8 +126,6 @@ impl Parser {
             .clone();
         match token.token_type {
             TokenType::Colon => {
-                // 只能是函数调用（根据语言设计，可以选择禁止或允许，这里保留调用但注意上下文）
-                // 若希望禁止函数内调用，可改为：return Err(self.error(ErrorKind::CallInsideFunction));
                 let name = token.spaces;
                 self.advance(); // 消耗 colon
                 if self.pos >= self.tokens.len() {
@@ -141,15 +135,12 @@ impl Parser {
                 if next.token_type != TokenType::Colon {
                     return Err(self.error(ErrorKind::ExpectedColonInCall));
                 }
-                let argc = next.spaces;
-                self.advance(); // 消耗第二个 colon
-                if let Some(semi) = self.current() {
-                    if semi.token_type == TokenType::Semicolon {
-                        self.advance(); // 消耗分号
-                        return Ok(Instruction::Call { name, argc });
-                    }
+                if next.token_type != TokenType::Semicolon {
+                    return Err(self.error(ErrorKind::ExpectedSemicolonAfterCall));
                 }
-                Err(self.error(ErrorKind::ExpectedSemicolonAfterCall))
+                let argc = next.spaces;        // Semicolon 的 spaces = 参数个数
+                self.advance();                // 消耗 Semicolon
+                Ok(Instruction::Call { name, argc })
             }
             _ => {
                 let inst = self.parse_simple_instruction(&token)?;
@@ -190,7 +181,13 @@ impl Parser {
                 1 => return Ok(Instruction::CharIn),
                 _ => ErrorKind::InvalidSpacesForComma { spaces },
             },
-            TokenType::Backtick => return Ok(Instruction::Mark { name: spaces }),
+            TokenType::Backtick => return Ok(Instruction::Mark {
+                name: spaces,
+                span: SourceSpan {
+                    line: token.line,
+                    column: token.column,
+                },
+            }),
             TokenType::Quote => return Ok(Instruction::Jump { name: spaces }),
             TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces }),
             _ => ErrorKind::UnexpectedToken {
@@ -204,13 +201,11 @@ impl Parser {
     /// 在主指令序列中收集 Mark 位置，并检查重复
     fn resolve_main_marks(&mut self) -> Result<(), StardustError> {
         for (idx, inst) in self.instructions.iter().enumerate() {
-            if let Instruction::Mark { name } = inst {
+            if let Instruction::Mark { name, span } = inst {
                 if self.marks.insert(*name, idx).is_some() {
-                    // 由于 Mark 指令本身有位置信息，但这里遍历时丢失了 token 位置，
-                    // 可改进为保存 token 位置或使用默认位置。这里简化处理。
                     return Err(StardustError::new(
                         ErrorKind::DuplicateMark { name: *name },
-                        Some(SourceSpan { line: 0, column: 0 }), // 实际应从原始 token 获取
+                        Some(span.clone()),
                     ));
                 }
             }

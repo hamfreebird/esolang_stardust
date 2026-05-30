@@ -136,10 +136,11 @@ impl VM {
             Instruction::Jump { name } if is_main => {
                 let target = *self.main_marks.get(&name)
                     .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name }))?;
-                if self.main_stack.len() >= 1 {
+                let cond = self.pop_main()?;   // 弹出栈顶条件值
+                if cond != 0 {
                     self.pc = target;
                 } else {
-                    return Err(self.error(ErrorKind::JumpWhenStackAreNotZero));
+                    self.pc += 1;
                 }
             }
             Instruction::UnconditionalJump { name } if is_main => {
@@ -189,9 +190,12 @@ impl VM {
         // 解析函数体内的标志
         let mut local_marks: HashMap<usize, usize> = HashMap::new();
         for (idx, inst) in body.iter().enumerate() {
-            if let Instruction::Mark { name } = inst {
+            if let Instruction::Mark { name, span } = inst {
                 if local_marks.insert(*name, idx).is_some() {
-                    return Err(self.error(ErrorKind::DuplicateMark { name: *name }));
+                    return Err(StardustError::new(
+                        ErrorKind::DuplicateMark { name: *name },
+                        Some(span.clone()),
+                    ));
                 }
             }
         }
@@ -310,14 +314,16 @@ impl VM {
                 Instruction::Jump { name } => {
                     let target = *local_marks.get(name)
                         .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
-                    if self.main_stack.len() >= 1 {
+                    let cond = new_stack.pop()
+                        .ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
+                    if cond != 0 {
                         local_pc = target;
                     } else {
-                        return Err(self.error(ErrorKind::JumpWhenStackAreNotZero));
+                        local_pc += 1;
                     }
                 }
                 Instruction::UnconditionalJump { name } => {
-                    let target = *self.main_marks.get(&name)
+                    let target = *local_marks.get(name)
                         .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
                     local_pc = target;
                 }

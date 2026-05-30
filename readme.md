@@ -290,6 +290,5 @@ stardust --dump code.stardust output/code.stardust_dump     # 指定输出路径
 |          | `InvalidAscii { value }`                        | 字符输出的值 `value` 超出 ASCII 范围 (0–127)                  |
 |          | `InvalidIntegerInput`                           | 数字输入时无法解析为整数                                        |
 |          | `NotEnoughArguments { func, expected, actual }` | 调用函数 `func` 时参数不足，期望 `expected` 个，实际栈中只有 `actual` 个 |
-|          | `JumpWhenStackAreNotZero`                       | 栈中的元素不为零时尝试跳转（不在使用 ~ 时报出）                           |
 | **I/O**  | `IoError { reason }`                            | 输入/输出操作失败                                           |
 

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use crate::extension::char2sd_list::*;
-use crate::stardust::{ErrorKind, StardustError, Token};
+use crate::stardust::{ErrorKind, StardustError};
 
 impl StardustError {
     fn code_point_too_large(c: char) -> Self {

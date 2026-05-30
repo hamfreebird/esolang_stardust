@@ -52,7 +52,7 @@ pub enum Instruction {
     NumIn,                      // 1 .
     CharOut,                    // 0 ,
     CharIn,                     // 1 ,
-    Mark { name: usize },       // (n) `
+    Mark { name: usize, span: SourceSpan },       // (n) `
     Jump { name: usize },       // (n) '
     Call { name: usize, argc: usize }, // (n1) : (n2) ;
     // 危险操作
@@ -126,7 +126,7 @@ pub enum ErrorKind {
     InvalidSpacesForComma { spaces: usize },
     InvalidInstructionContext,
     NotEnoughArguments { func: usize, expected: usize, actual: usize },
-    JumpWhenStackAreNotZero,
+    // JumpWhenStackAreNotZero,
     InvalidAnnotation,
     ParseChar,
     StdIoError,

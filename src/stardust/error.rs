@@ -61,7 +61,7 @@ impl ErrorKind {
                     func, expected, actual
                 )
             }
-            ErrorKind::JumpWhenStackAreNotZero => "attempt a jump when the elements in the stack are not zero".to_string(),
+            // ErrorKind::JumpWhenStackAreNotZero => "attempt a jump when the elements in the stack are not zero".to_string(),
             ErrorKind::InvalidAnnotation => "invalid annotation, use '//'".to_string(),
             _ => {
                 "unknown error\n\
