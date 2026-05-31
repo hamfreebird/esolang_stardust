@@ -1,6 +1,8 @@
+use crate::stardust::debugger::Debugger;
 use std::collections::HashMap;
 use serde::Serialize;
 
+pub mod debugger;
 pub mod lexer;
 pub mod parser;
 pub mod vm;
@@ -138,6 +140,71 @@ pub struct VM {
     heap: HashMap<i64, i64>,
     /// 是否结束运行
     halted: bool,
+    /// 调试器（None 表示非调试模式）
+    pub debug: Option<Debugger>,
+}
+
+impl VM {
+    /// 获取当前执行帧
+    pub fn current_frame(&self) -> &CallFrame {
+        self.frames.last().expect("VM has no frames")
+    }
+
+    /// 当前帧索引（0 = main）
+    pub fn current_frame_index(&self) -> usize {
+        self.frames.len().saturating_sub(1)
+    }
+
+    /// 堆条目数
+    pub fn heap_len(&self) -> usize {
+        self.heap.len()
+    }
+
+    /// 堆引用
+    pub fn heap_entries(&self) -> &HashMap<i64, i64> {
+        &self.heap
+    }
+
+    /// 函数表条目数
+    pub fn function_count(&self) -> usize {
+        self.functions.len()
+    }
+
+    /// 所有调用帧
+    pub fn all_frames(&self) -> &[CallFrame] {
+        &self.frames
+    }
+
+    /// 当前帧的栈（栈顶在后）
+    pub fn current_stack(&self) -> &[i64] {
+        &self.frames.last().map(|f| &f.stack[..]).unwrap_or(&[])
+    }
+
+    /// 设置主帧栈（REPL 状态注入）
+    pub fn set_main_stack(&mut self, stack: Vec<i64>) {
+        if self.frames.is_empty() {
+            self.frames.push(CallFrame::new(vec![], HashMap::new()));
+        }
+        self.frames[0].stack = stack;
+    }
+
+    /// 取出主帧栈（REPL 状态保存）
+    pub fn take_main_stack(&mut self) -> Vec<i64> {
+        self.frames
+            .first_mut()
+            .map(|f| std::mem::take(&mut f.stack))
+            .unwrap_or_default()
+    }
+
+    /// 设置堆（REPL 状态注入）
+    pub fn set_heap(&mut self, heap: HashMap<i64, i64>) {
+        self.heap = heap;
+    }
+
+    /// 取出堆（REPL 状态保存）
+    pub fn take_heap(&mut self) -> HashMap<i64, i64> {
+        std::mem::take(&mut self.heap)
+    }
 }
 
 /// 源代码位置信息

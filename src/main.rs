@@ -1,5 +1,7 @@
 use esolang_stardust::codegen::{self, CodeGenConfig};
 use esolang_stardust::extension::unwind::simple_preprocess;
+use esolang_stardust::repl;
+use esolang_stardust::stardust::debugger::Debugger;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
 use esolang_stardust::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
@@ -7,7 +9,7 @@ use esolang_stardust::stardust::{StardustError, VM};
 use std::{env, fs, process};
 
 // TODO:转译为Rust/C代码，实现编译为可执行文件  ← LLVM 编译已实现！
-// TODO:增加调试处理，单点执行
+// TODO:增加调试处理，单点执行  ← 调试器已实现！使用 --debug 或 -d
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,13 +17,31 @@ fn main() {
 }
 
 fn stardust(args: Vec<String>) {
-    if args.len() < 2 {
-        print_usage(&args[0]);
+    // 提取标志
+    let has_repl = args.iter().any(|a| a == "--repl" || a == "-r");
+    let has_debug = args.iter().any(|a| a == "--debug" || a == "-d");
+    let has_help = args.iter().any(|a| a == "--help" || a == "-h");
+
+    if has_help {
+        print_cli_usage(&args[0]);
         process::exit(0);
     }
 
-    if args[1] == "--help" || args[1] == "-h" {
-        print_cli_usage(&args[0]);
+    // ── REPL 模式 ──
+    if has_repl {
+        let file = args.iter().find(|a| a.ends_with(".sd") || a.ends_with(".stardust"));
+        repl::repl_main(has_debug, file.map(|s| s.as_str()));
+        return;
+    }
+
+    // 过滤标志参数，保留位置参数
+    let args: Vec<String> = args
+        .into_iter()
+        .filter(|a| a != "--debug" && a != "-d" && a != "--repl" && a != "-r")
+        .collect();
+
+    if args.len() < 2 {
+        print_usage(&args[0]);
         process::exit(0);
     }
 
@@ -38,8 +58,8 @@ fn stardust(args: Vec<String>) {
     } else if args[1] == "--build" || args[1] == "-b" {
         cmd_build(&args);
     } else {
-        // 解释执行模式（默认）
-        cmd_run(&args);
+        // 解释执行模式（默认），传递 has_debug
+        cmd_run(&args, has_debug);
     }
 }
 
@@ -264,7 +284,7 @@ fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
 }
 
 /// 默认运行模式：完整流水线执行
-fn cmd_run(args: &[String]) {
+fn cmd_run(args: &[String], debug_mode: bool) {
     if args.len() != 2 {
         print_usage(&args[0]);
         process::exit(0);
@@ -309,6 +329,13 @@ fn cmd_run(args: &[String]) {
     };
 
     let mut vm = VM::new(parsed);
+
+    // 激活调试器
+    if debug_mode {
+        vm.debug = Some(Debugger::new());
+        eprintln!("Stardust debugger enabled. Type 'h' for help.");
+    }
+
     if let Err(e) = vm.run() {
         print_error(&e, &source, filename);
         process::exit(1);
@@ -343,6 +370,11 @@ fn print_json_diagnostics(errors: &[&esolang_stardust::stardust::StardustError])
 fn print_cli_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} <file.sd>                      Run a Stardust program", program);
+    eprintln!("  {} --debug <file.sd>              Run with interactive debugger", program);
+    eprintln!("  {} -d <file.sd>                   Same as --debug", program);
+    eprintln!("  {} --repl                         Start interactive REPL", program);
+    eprintln!("  {} -r                             Same as --repl", program);
+    eprintln!("  {} -r -d [file.sd]               REPL with debug mode", program);
     eprintln!("  {} --check <file.sd>             Check syntax, output JSON diagnostics", program);
     eprintln!("  {} --tokens <file.sd>            Output token stream as JSON", program);
     eprintln!("  {} --compile <file.sd> [out.ll]  Compile to LLVM IR", program);

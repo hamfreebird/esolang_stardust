@@ -1,16 +1,33 @@
 {
     "name": "stardust",
     "displayName": "Stardust Language Support",
-    "description": "Syntax highlighting, diagnostics, and run support for the Stardust esolang",
-    "version": "0.1.0",
+    "description": "Syntax highlighting, diagnostics, hover hints, and run/debug support for the Stardust esoteric programming language. Stardust is a Whitespace-inspired language where programs consist only of spaces and 16 symbol characters — instruction semantics are determined entirely by the number of leading spaces.",
+    "version": "0.1.4",
     "publisher": "freebird",
     "license": "MIT",
     "icon": "icon.png",
+    "author": {
+        "name": "freebird",
+        "email": "freebirdflyinthesky@outlook.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/hamfreebird/esolang_stardust"
+    },
     "engines": {
         "vscode": "^1.80.0"
     },
     "categories": [
-        "Programming Languages"
+        "Programming Languages",
+        "Debuggers",
+        "Other"
+    ],
+    "keywords": [
+        "stardust",
+        "esolang",
+        "esoteric-language",
+        "whitespace",
+        "stack-based"
     ],
     "activationEvents": [
         "onLanguage:sd"

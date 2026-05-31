@@ -325,6 +325,7 @@ impl VM {
             frames: vec![main_frame],
             heap: HashMap::new(),
             halted: false,
+            debug: None,
         }
     }
 
@@ -338,10 +339,8 @@ impl VM {
 
             if frame_done {
                 if self.frames.len() == 1 {
-                    // 主程序结束
                     break;
                 }
-                // 函数返回：弹出帧，合并栈，恢复 ret_pc
                 let finished = self.frames.pop().unwrap();
                 let parent = self.frames.last_mut().unwrap();
                 parent.stack.extend(finished.stack);
@@ -349,19 +348,47 @@ impl VM {
                 continue;
             }
 
-            // 读取下一条指令（在独立作用域中释放借用）
+            // 读取下一条指令
             let inst = {
                 let frame = self.frames.last().unwrap();
                 frame.instructions[frame.pc].clone()
             };
 
-            // 执行指令（在独立作用域中释放借用）
+            // ── 调试钩子 ────────────────────────────────
+            let should_break = match &self.debug {
+                Some(dbg) => {
+                    let frame = self.frames.last().unwrap();
+                    dbg.should_break(frame.pc, &frame.marks, &inst)
+                }
+                None => false,
+            };
+
+            if should_break {
+                // 临时取出 debugger，解除借用冲突
+                let mut debug = self.debug.take();
+                if let Some(ref mut dbg) = debug {
+                    match dbg.interact(self) {
+                        Ok(crate::stardust::debugger::DebugAction::Quit) => {
+                            self.halted = true;
+                            self.debug = debug;
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Debugger I/O error: {}", e);
+                        }
+                    }
+                }
+                self.debug = debug;
+            }
+            // ── 调试钩子结束 ──────────────────────────
+
+            // 执行指令
             let call_info = {
                 let frame = self.frames.last_mut().unwrap();
                 execute_in_frame(frame, &mut self.heap, &inst)?
             };
 
-            // 处理函数调用（此时没有对 self.frames 的借用）
             if let Some((name, argc, meta)) = call_info {
                 self.handle_call(name, argc, &meta)?;
             }
