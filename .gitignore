@@ -1,2 +1,8 @@
 /target
+/build
 node_modules/
+
+# Generated LLVM IR and compiled binaries
+*.ll
+hello_world_bin
+

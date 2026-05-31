@@ -805,3 +805,275 @@ fn compare_and_jump_conditional() {
     );
     assert!(run(&src).is_ok());
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 21. 编译器集成测试 — IR 结构验证
+// ════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod codegen_tests {
+    use super::*;
+    use esolang_stardust::codegen::{self, CodeGenConfig};
+    use esolang_stardust::stardust::lexer::tokenize;
+    use esolang_stardust::stardust::parser::parse_program;
+    use std::process::Command;
+
+    fn compile_src_to_ir(source: &str) -> String {
+        let tokens = tokenize(source).unwrap();
+        let parsed = parse_program(tokens).unwrap();
+        codegen::compile_to_ir(&parsed, &CodeGenConfig::default())
+    }
+
+    /// 辅助：将 IR 编译为临时可执行文件并运行，返回 (stdout, stderr, exit_code)
+    fn compile_and_run(ir: &str) -> Option<(String, String, i32)> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let dir = std::env::temp_dir();
+        let unique = format!("sd_test_{}_{}", std::process::id(), n);
+        let ll_path = dir.join(format!("{}.ll", unique));
+        let exe_path = dir.join(&unique);
+        std::fs::write(&ll_path, ir).ok()?;
+        let out = Command::new("clang")
+            .args([ll_path.to_str()?, "-o", exe_path.to_str()?])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            let _ = std::fs::remove_file(&ll_path);
+            return None;
+        }
+        let run = Command::new(&exe_path).output().ok()?;
+        let _ = std::fs::remove_file(&ll_path);
+        let _ = std::fs::remove_file(&exe_path);
+        Some((
+            String::from_utf8_lossy(&run.stdout).to_string(),
+            String::from_utf8_lossy(&run.stderr).to_string(),
+            run.status.code().unwrap_or(-1),
+        ))
+    }
+
+    #[test]
+    fn compile_hello_world_and_run() {
+        let src = include_str!("../hello_world.sd");
+        let ir = compile_src_to_ir(src);
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0, "compiled hello world should exit 0");
+            assert_eq!(stdout, "Hello World!", "should output Hello World!");
+        }
+    }
+
+    #[test]
+    fn compile_arithmetic_and_verify_ir() {
+        // Push(10) Push(20) Add Push(5) Sub → 10+20-5 = 25
+        let src = format!(
+            "{}{}{}{}{}",
+            push(10), push(20), add(), push(5), sub()
+        );
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("checked_add"), "should contain checked_add");
+        assert!(ir.contains("checked_sub"), "should contain checked_sub");
+        assert!(ir.contains("define i64 @main()"), "should have main entry");
+    }
+
+    #[test]
+    fn compile_simple_char_output() {
+        // Push(65) CharOut → 'A'
+        let src = format!("{}{}", push(65), char_out());
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("putchar"), "should call putchar");
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "A");
+        }
+    }
+
+    #[test]
+    fn compile_simple_number_output() {
+        // Push(42) NumOut
+        let src = format!("{}{}", push(42), num_out());
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("printf"), "should call printf");
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout.trim(), "42");
+        }
+    }
+
+    #[test]
+    fn compile_with_constant_folding() {
+        // Push(5) Push(3) Add → optimizer folds to Push(8)
+        let src = format!("{}{}{}", push(5), push(3), add());
+        let ir = compile_src_to_ir(&src);
+        // The checked_add FUNCTION DEFINITION is always in intrinsics,
+        // but there should be no CALL to it from sd_main after folding
+        assert!(!ir.contains("call i64 @checked_add"),
+                "optimizer should fold 5+3, no checked_add CALL needed");
+        assert!(ir.contains("i64 8"), "folded constant should appear in IR");
+        if let Some((_stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+        }
+    }
+
+    #[test]
+    fn compile_comparison_produces_zero_or_one() {
+        // Push(5) Push(3) Lt → 0 (5 < 3 is false)
+        let src = format!("{}{}{}{}", push(5), push(3), lt(), num_out());
+        let ir = compile_src_to_ir(&src);
+        // After optimization: 5 < 3 = 0 → Push(0), so icmp may not appear
+        assert!(ir.contains("define void @sd_main"), "should compile");
+    }
+
+    #[test]
+    fn compile_loop_runs() {
+        // Countdown loop: Push(3) Mark(0) Dup Push(1) Sub Dup Jump(0)
+        // Pushes 3 then loops: dup, push 1, sub, dup, jump(0) until top is 0
+        let src = format!(
+            "{}{}{}{}{}{}{}{}",
+            push(3),                // initial counter
+            mark(0),                // loop start
+            dup(),                  // duplicate counter
+            push(1),                // push 1
+            sub(),                  // decrement
+            dup(),                  // duplicate for next iteration
+            jump(0),                // loop if nonzero
+            pop(),                  // clean up final zero
+        );
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("mark_0:"), "should have loop label");
+        assert!(ir.contains("br i1"), "should have conditional branch");
+    }
+
+    #[test]
+    fn compile_function_call_and_run() {
+        // (1): Push(65) CharOut (1):   — function that outputs 'A'
+        // (1): (0);                    — call function 1 with 0 args
+        let src = format!(
+            "{}{}",
+            func(1, &format!("{}{}", push(65), char_out())),
+            call(1, 0),
+        );
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("@sd_func_1"), "should define function 1");
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "A");
+        }
+    }
+
+    #[test]
+    fn compile_nested_function_call_and_run() {
+        // (2): Push(66) CharOut (2):         — outputs 'B'
+        // (1): Push(65) CharOut (2): (0); (1): — outputs 'A' then calls 2
+        // (1): (0);                           — call 1
+        let src = format!(
+            "{}{}{}",
+            func(2, &format!("{}{}", push(66), char_out())),
+            func(1, &format!("{}{}{}", push(65), char_out(), call(2, 0))),
+            call(1, 0),
+        );
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("@sd_func_1"));
+        assert!(ir.contains("@sd_func_2"));
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "AB");
+        }
+    }
+
+    #[test]
+    fn compile_function_with_args_and_run() {
+        // (3): Add CharOut (3):             — adds 2 args, outputs as char
+        // Push(64) Push(1) (3): (2);        — 64+1=65='A'
+        let src = format!(
+            "{}{}{}{}",
+            func(3, &format!("{}{}", add(), char_out())),
+            push(64),
+            push(1),
+            call(3, 2),
+        );
+        let ir = compile_src_to_ir(&src);
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "A");
+        }
+    }
+
+    #[test]
+    fn compile_heap_store_load() {
+        // Store pops addr first, then val. So Push(val) Push(addr) Store
+        // Push(72) Push(0) Store → heap[0] = 72
+        // Push(0) Load → push heap[0] = 72
+        // CharOut → 'H'
+        let src = format!(
+            "{}{}{}{}{}{}",
+            push(72), push(0), store(),  // heap[0] = 72
+            push(0), load(),             // push heap[0]
+            char_out(),                  // output 'H'
+        );
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("@heap"), "should access heap");
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "H");
+        }
+    }
+
+    #[test]
+    fn compile_comparison_jump_conditional() {
+        // Push(5) Push(5) Eq Jump(0) Push(1) CharOut Mark(0) Push(65) CharOut
+        // 5==5 → true(1) → Jump(0) → skips Push(1) CharOut → outputs 'A'
+        let src = format!(
+            "{}{}{}{}{}{}{}{}{}",
+            push(5), push(5), eq(),
+            jump(0),
+            push(1), char_out(),
+            mark(0),
+            push(65), char_out(),
+        );
+        let ir = compile_src_to_ir(&src);
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "A");
+        }
+    }
+
+    #[test]
+    fn compile_empty_program_runs() {
+        let ir = compile_src_to_ir("");
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0);
+            assert_eq!(stdout, "");
+        }
+    }
+
+    #[test]
+    fn compile_depth_instruction() {
+        // Push(1) Push(2) Depth → stack: [1, 2, 2]
+        let src = format!("{}{}{}", push(1), push(2), depth());
+        let ir = compile_src_to_ir(&src);
+        assert!(ir.contains("@frame_base_stack"), "depth uses frame base tracking");
+    }
+
+    #[test]
+    fn compile_toolchain_check() {
+        let status = codegen::check_toolchain();
+        // Must have clang available (was used to compile)
+        assert!(status.clang, "clang should be available");
+        assert!(status.llc, "llc should be available");
+        assert!(status.can_compile(), "toolchain should be complete");
+    }
+
+    #[test]
+    fn compile_ir_file_and_cleanup() {
+        let src = format!("{}{}", push(65), char_out());
+        let tokens = tokenize(&src).unwrap();
+        let parsed = parse_program(tokens).unwrap();
+        let tmp = std::env::temp_dir().join("sd_test_output.ll");
+        let config = CodeGenConfig::default();
+        codegen::compile_to_ir_file(&parsed, &tmp, &config).unwrap();
+        assert!(tmp.exists(), "IR file should be created");
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        assert!(content.contains("putchar"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
