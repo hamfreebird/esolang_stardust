@@ -38,26 +38,26 @@ pub struct Token {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Instruction {
-    Push(i64),                  // (n >= 5) +  -> n-5
-    Dup,                        // 1 +
-    Swap,                       // 2 +
-    Rotate,                     // 3 +
-    Pop,                        // 4 +
-    Add,                        // 0 *
-    Sub,                        // 1 *
-    Mul,                        // 2 *
-    Div,                        // 3 *
-    Mod,                        // 4 *
-    Reverse,                    // 5 *
-    NumOut,                     // 0 .
-    NumIn,                      // 1 .
-    CharOut,                    // 0 ,
-    CharIn,                     // 1 ,
-    Mark { name: usize, span: SourceSpan },       // (n) `
-    Jump { name: usize },       // (n) '
-    Call { name: usize, argc: usize }, // (n1) : (n2) ;
+    Push(i64, InstrMeta),                  // (n >= 5) +  -> n-5
+    Dup(InstrMeta),                        // 1 +
+    Swap(InstrMeta),                       // 2 +
+    Rotate(InstrMeta),                     // 3 +
+    Pop(InstrMeta),                        // 4 +
+    Add(InstrMeta),                        // 0 *
+    Sub(InstrMeta),                        // 1 *
+    Mul(InstrMeta),                        // 2 *
+    Div(InstrMeta),                        // 3 *
+    Mod(InstrMeta),                        // 4 *
+    Reverse(InstrMeta),                    // 5 *
+    NumOut(InstrMeta),                     // 0 .
+    NumIn(InstrMeta),                      // 1 .
+    CharOut(InstrMeta),                    // 0 ,
+    CharIn(InstrMeta),                     // 1 ,
+    Mark { name: usize, meta: InstrMeta },       // (n) `
+    Jump { name: usize, meta: InstrMeta },       // (n) '
+    Call { name: usize, argc: usize, meta: InstrMeta }, // (n1) : (n2) ;
     // 危险操作
-    UnconditionalJump { name: usize ,} // (n) ~
+    UnconditionalJump { name: usize, meta: InstrMeta } // (n) ~
 }
 
 #[derive(Debug, Serialize)]
@@ -97,6 +97,28 @@ pub struct VM {
 pub struct SourceSpan {
     pub line: usize,
     pub column: usize,
+}
+
+/// 指令元数据 — 附加到每条指令上的源码位置和调试信息
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct InstrMeta {
+    pub span: SourceSpan,
+}
+
+impl InstrMeta {
+    pub fn new(line: usize, column: usize) -> Self {
+        InstrMeta {
+            span: SourceSpan { line, column },
+        }
+    }
+}
+
+impl Default for InstrMeta {
+    fn default() -> Self {
+        InstrMeta {
+            span: SourceSpan { line: 1, column: 1 },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

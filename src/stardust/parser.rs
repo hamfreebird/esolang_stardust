@@ -1,5 +1,5 @@
 use crate::stardust::{
-    ErrorKind, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType,
+    ErrorKind, InstrMeta, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType,
 };
 use std::collections::HashMap;
 
@@ -31,6 +31,10 @@ impl Parser {
         } else {
             SourceSpan { line: 0, column: 0 } // EOF
         }
+    }
+
+    fn meta_from_token(token: &Token) -> InstrMeta {
+        InstrMeta::new(token.line, token.column)
     }
 
     fn error(&self, kind: ErrorKind) -> StardustError {
@@ -76,7 +80,8 @@ impl Parser {
         // 检查调用模式：下一个 token 是 Semicolon
         if self.is_call_pattern() {
             let argc = self.tokens[self.pos].spaces;  // Semicolon 的 spaces = n2 = 参数个数
-            self.instructions.push(Instruction::Call { name, argc });
+            let meta = Parser::meta_from_token(&self.tokens[self.pos]);
+            self.instructions.push(Instruction::Call { name, argc, meta });
             self.pos += 1;  // 跳过 Semicolon
             return Ok(());
         }
@@ -127,6 +132,7 @@ impl Parser {
         match token.token_type {
             TokenType::Colon => {
                 let name = token.spaces;
+                let meta = Parser::meta_from_token(&token);
                 self.advance(); // 消耗 colon
                 if self.pos >= self.tokens.len() {
                     return Err(self.error(ErrorKind::IncompleteFunctionCall));
@@ -137,7 +143,7 @@ impl Parser {
                 }
                 let argc = next.spaces;        // Semicolon 的 spaces = 参数个数
                 self.advance();                // 消耗 Semicolon
-                Ok(Instruction::Call { name, argc })
+                Ok(Instruction::Call { name, argc, meta })
             }
             _ => {
                 let inst = self.parse_simple_instruction(&token)?;
@@ -150,43 +156,41 @@ impl Parser {
     /// 解析非 Colon 开头的简单指令
     fn parse_simple_instruction(&self, token: &Token) -> Result<Instruction, StardustError> {
         let spaces = token.spaces;
+        let meta = Parser::meta_from_token(token);
         let kind = match token.token_type {
             TokenType::Plus => match spaces {
                 0 => ErrorKind::InvalidSpacesForPlus,
-                1 => return Ok(Instruction::Dup),
-                2 => return Ok(Instruction::Swap),
-                3 => return Ok(Instruction::Rotate),
-                4 => return Ok(Instruction::Pop),
-                n => return Ok(Instruction::Push((n - 5) as i64)),
+                1 => return Ok(Instruction::Dup(meta)),
+                2 => return Ok(Instruction::Swap(meta)),
+                3 => return Ok(Instruction::Rotate(meta)),
+                4 => return Ok(Instruction::Pop(meta)),
+                n => return Ok(Instruction::Push((n - 5) as i64, meta)),
             },
             TokenType::Star => match spaces {
-                0 => return Ok(Instruction::Add),
-                1 => return Ok(Instruction::Sub),
-                2 => return Ok(Instruction::Mul),
-                3 => return Ok(Instruction::Div),
-                4 => return Ok(Instruction::Mod),
-                5 => return Ok(Instruction::Reverse),
+                0 => return Ok(Instruction::Add(meta)),
+                1 => return Ok(Instruction::Sub(meta)),
+                2 => return Ok(Instruction::Mul(meta)),
+                3 => return Ok(Instruction::Div(meta)),
+                4 => return Ok(Instruction::Mod(meta)),
+                5 => return Ok(Instruction::Reverse(meta)),
                 _ => ErrorKind::InvalidSpacesForStar { spaces },
             },
             TokenType::Dot => match spaces {
-                0 => return Ok(Instruction::NumOut),
-                1 => return Ok(Instruction::NumIn),
+                0 => return Ok(Instruction::NumOut(meta)),
+                1 => return Ok(Instruction::NumIn(meta)),
                 _ => ErrorKind::InvalidSpacesForDot { spaces },
             },
             TokenType::Comma => match spaces {
-                0 => return Ok(Instruction::CharOut),
-                1 => return Ok(Instruction::CharIn),
+                0 => return Ok(Instruction::CharOut(meta)),
+                1 => return Ok(Instruction::CharIn(meta)),
                 _ => ErrorKind::InvalidSpacesForComma { spaces },
             },
             TokenType::Backtick => return Ok(Instruction::Mark {
                 name: spaces,
-                span: SourceSpan {
-                    line: token.line,
-                    column: token.column,
-                },
+                meta,
             }),
-            TokenType::Quote => return Ok(Instruction::Jump { name: spaces }),
-            TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces }),
+            TokenType::Quote => return Ok(Instruction::Jump { name: spaces, meta }),
+            TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces, meta }),
             _ => ErrorKind::UnexpectedToken {
                 expected: "instruction symbol".to_string(),
                 found: format!("{:?}", token.token_type),
@@ -198,11 +202,11 @@ impl Parser {
     /// 在主指令序列中收集 Mark 位置，并检查重复
     fn resolve_main_marks(&mut self) -> Result<(), StardustError> {
         for (idx, inst) in self.instructions.iter().enumerate() {
-            if let Instruction::Mark { name, span } = inst {
+            if let Instruction::Mark { name, meta } = inst {
                 if self.marks.insert(*name, idx).is_some() {
                     return Err(StardustError::new(
                         ErrorKind::DuplicateMark { name: *name },
-                        Some(span.clone()),
+                        Some(meta.span.clone()),
                     ));
                 }
             }
@@ -223,6 +227,8 @@ pub fn parse_program(tokens: Vec<Token>) -> Result<ParseResult, StardustError> {
 mod tests {
     use super::*;
     use crate::stardust::TokenType;
+
+    fn meta() -> InstrMeta { InstrMeta::default() }
 
     fn tok(spaces: usize, tt: TokenType) -> Token {
         Token { spaces, token_type: tt, line: 1, column: 1, byte_pos: 0 }
@@ -248,50 +254,50 @@ mod tests {
     fn push_5_spaces_is_0() {
         // 5空格+ → Push(5-5) = Push(0)
         let result = parse_program(vec![plus(5)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Push(0)]);
+        assert_eq!(result.main_instructions, vec![Instruction::Push(0, meta())]);
     }
 
     #[test]
     fn push_6_spaces_is_1() {
         let result = parse_program(vec![plus(6)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Push(1)]);
+        assert_eq!(result.main_instructions, vec![Instruction::Push(1, meta())]);
     }
 
     #[test]
     fn push_10_spaces_is_5() {
         let result = parse_program(vec![plus(10)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Push(5)]);
+        assert_eq!(result.main_instructions, vec![Instruction::Push(5, meta())]);
     }
 
     #[test]
     fn push_large_value() {
         // Push(100) → 105 空格
         let result = parse_program(vec![plus(105)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Push(100)]);
+        assert_eq!(result.main_instructions, vec![Instruction::Push(100, meta())]);
     }
 
     #[test]
     fn dup_1_space_plus() {
         let result = parse_program(vec![plus(1)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Dup]);
+        assert_eq!(result.main_instructions, vec![Instruction::Dup(meta())]);
     }
 
     #[test]
     fn swap_2_spaces_plus() {
         let result = parse_program(vec![plus(2)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Swap]);
+        assert_eq!(result.main_instructions, vec![Instruction::Swap(meta())]);
     }
 
     #[test]
     fn rotate_3_spaces_plus() {
         let result = parse_program(vec![plus(3)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Rotate]);
+        assert_eq!(result.main_instructions, vec![Instruction::Rotate(meta())]);
     }
 
     #[test]
     fn pop_4_spaces_plus() {
         let result = parse_program(vec![plus(4)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Pop]);
+        assert_eq!(result.main_instructions, vec![Instruction::Pop(meta())]);
     }
 
     #[test]
@@ -306,37 +312,37 @@ mod tests {
     #[test]
     fn add_0_star() {
         let result = parse_program(vec![star(0)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Add]);
+        assert_eq!(result.main_instructions, vec![Instruction::Add(meta())]);
     }
 
     #[test]
     fn sub_1_star() {
         let result = parse_program(vec![star(1)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Sub]);
+        assert_eq!(result.main_instructions, vec![Instruction::Sub(meta())]);
     }
 
     #[test]
     fn mul_2_star() {
         let result = parse_program(vec![star(2)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Mul]);
+        assert_eq!(result.main_instructions, vec![Instruction::Mul(meta())]);
     }
 
     #[test]
     fn div_3_star() {
         let result = parse_program(vec![star(3)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Div]);
+        assert_eq!(result.main_instructions, vec![Instruction::Div(meta())]);
     }
 
     #[test]
     fn mod_4_star() {
         let result = parse_program(vec![star(4)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Mod]);
+        assert_eq!(result.main_instructions, vec![Instruction::Mod(meta())]);
     }
 
     #[test]
     fn reverse_5_star() {
         let result = parse_program(vec![star(5)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Reverse]);
+        assert_eq!(result.main_instructions, vec![Instruction::Reverse(meta())]);
     }
 
     #[test]
@@ -351,13 +357,13 @@ mod tests {
     #[test]
     fn num_out_0_dot() {
         let result = parse_program(vec![dot(0)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::NumOut]);
+        assert_eq!(result.main_instructions, vec![Instruction::NumOut(meta())]);
     }
 
     #[test]
     fn num_in_1_dot() {
         let result = parse_program(vec![dot(1)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::NumIn]);
+        assert_eq!(result.main_instructions, vec![Instruction::NumIn(meta())]);
     }
 
     #[test]
@@ -370,13 +376,13 @@ mod tests {
     #[test]
     fn char_out_0_comma() {
         let result = parse_program(vec![comma(0)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::CharOut]);
+        assert_eq!(result.main_instructions, vec![Instruction::CharOut(meta())]);
     }
 
     #[test]
     fn char_in_1_comma() {
         let result = parse_program(vec![comma(1)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::CharIn]);
+        assert_eq!(result.main_instructions, vec![Instruction::CharIn(meta())]);
     }
 
     #[test]
@@ -412,13 +418,13 @@ mod tests {
     #[test]
     fn jump_with_name_3() {
         let result = parse_program(vec![quote(3)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Jump { name: 3 }]);
+        assert_eq!(result.main_instructions, vec![Instruction::Jump { name: 3, meta: meta() }]);
     }
 
     #[test]
     fn unconditional_jump() {
         let result = parse_program(vec![tilde(7)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::UnconditionalJump { name: 7 }]);
+        assert_eq!(result.main_instructions, vec![Instruction::UnconditionalJump { name: 7, meta: meta() }]);
     }
 
     // ═══════════ 5. 重复标志错误 ═══════════
@@ -452,8 +458,8 @@ mod tests {
         assert!(result.functions.contains_key(&1));
         let body = &result.functions[&1];
         assert_eq!(body.len(), 2);
-        assert_eq!(body[0], Instruction::Push(0));
-        assert_eq!(body[1], Instruction::CharOut);
+        assert_eq!(body[0], Instruction::Push(0, meta()));
+        assert_eq!(body[1], Instruction::CharOut(meta()));
         assert!(result.main_instructions.is_empty());
     }
 
@@ -512,7 +518,7 @@ mod tests {
         assert_eq!(result.functions.len(), 1);
         let body = &result.functions[&1];
         assert_eq!(body.len(), 1);
-        assert_eq!(body[0], Instruction::Call { name: 2, argc: 3 });
+        assert_eq!(body[0], Instruction::Call { name: 2, argc: 3, meta: meta() });
     }
 
     // ═══════════ 7. 函数调用 (顶层) ═══════════
@@ -526,7 +532,7 @@ mod tests {
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.main_instructions.len(), 1);
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 3, argc: 2 });
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 3, argc: 2, meta: meta() });
     }
 
     #[test]
@@ -537,7 +543,7 @@ mod tests {
             semicolon(0),
         ];
         let result = parse_program(tokens).unwrap();
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0 });
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0, meta: meta() });
     }
 
     #[test]
@@ -550,7 +556,7 @@ mod tests {
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
         assert_eq!(result.main_instructions.len(), 1);
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0 });
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0, meta: meta() });
     }
 
     // ═══════════ 8. 混合指令 ═══════════
@@ -575,8 +581,8 @@ mod tests {
             comma(0),   // CharOut
         ];
         let result = parse_program(tokens).unwrap();
-        assert_eq!(result.main_instructions[0], Instruction::Push(72));
-        assert_eq!(result.main_instructions[1], Instruction::CharOut);
+        assert_eq!(result.main_instructions[0], Instruction::Push(72, meta()));
+        assert_eq!(result.main_instructions[1], Instruction::CharOut(meta()));
     }
 
     #[test]
@@ -610,7 +616,7 @@ mod tests {
         // (0): (3);  调用 name=0, argc=3
         let tokens = vec![colon(0), semicolon(3)];
         let result = parse_program(tokens).unwrap();
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 0, argc: 3 });
+        assert_eq!(result.main_instructions[0], Instruction::Call { name: 0, argc: 3, meta: meta() });
     }
 
     // ═══════════ 11. Mark 中的 SourceSpan ═══════════
@@ -620,9 +626,9 @@ mod tests {
         let t = tok_at(1, TokenType::Backtick, 5, 10);
         let result = parse_program(vec![t]).unwrap();
         match &result.main_instructions[0] {
-            Instruction::Mark { name: 1, span } => {
-                assert_eq!(span.line, 5);
-                assert_eq!(span.column, 10);
+            Instruction::Mark { name: 1, meta: m } => {
+                assert_eq!(m.span.line, 5);
+                assert_eq!(m.span.column, 10);
             }
             _ => panic!("expected Mark with span"),
         }

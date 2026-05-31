@@ -1,6 +1,208 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use crate::stardust::{ErrorKind, Instruction, ParseResult, StardustError, VM};
+use crate::stardust::{ErrorKind, InstrMeta, Instruction, ParseResult, StardustError, VM};
+
+/// 通用栈执行器 — 统一主程序和函数体的指令执行逻辑
+///
+/// 通过借用外部的栈、PC 和 Marks 映射，消除 `execute_instruction()` 与
+/// `handle_function_call()` 内部循环之间的 ~150 行重复代码。
+struct StackExecutor<'a> {
+    stack: &'a mut Vec<i64>,
+    pc: &'a mut usize,
+    marks: &'a HashMap<usize, usize>,
+    /// `true` = 主程序上下文 (Call 合法)；`false` = 函数体内部 (Call 非法)
+    is_main: bool,
+}
+
+impl<'a> StackExecutor<'a> {
+    fn new(
+        stack: &'a mut Vec<i64>,
+        pc: &'a mut usize,
+        marks: &'a HashMap<usize, usize>,
+        is_main: bool,
+    ) -> Self {
+        StackExecutor { stack, pc, marks, is_main }
+    }
+
+    /// 弹出栈顶，若栈为空则返回带位置的 StackUnderflow 错误
+    fn pop(&mut self, meta: &InstrMeta) -> Result<i64, StardustError> {
+        self.stack.pop().ok_or_else(|| {
+            StardustError::new(
+                ErrorKind::StackUnderflow,
+                Some(meta.span.clone()),
+            )
+        })
+    }
+
+    /// 创建带位置信息的 StardustError
+    fn error(&self, kind: ErrorKind, meta: &InstrMeta) -> StardustError {
+        StardustError::new(kind, Some(meta.span.clone()))
+    }
+
+    /// 执行单条指令，返回是否需要 VM 层处理函数调用
+    ///
+    /// - `Ok(None)`：指令已完全处理（大多数指令）
+    /// - `Ok(Some(call_info))`：主程序遇到 Call 指令，需要 VM 层接管
+    /// - `Err(...)`：执行错误
+    fn execute(
+        &mut self,
+        inst: &Instruction,
+    ) -> Result<Option<(usize, usize, InstrMeta)>, StardustError> {
+        match inst {
+            // ── 栈操作 ──────────────────────────────────────────
+            Instruction::Push(val, _) => {
+                self.stack.push(*val);
+                *self.pc += 1;
+            }
+            Instruction::Dup(meta) => {
+                let top = self.pop(meta)?;
+                self.stack.push(top);
+                self.stack.push(top);
+                *self.pc += 1;
+            }
+            Instruction::Swap(meta) => {
+                let a = self.pop(meta)?;
+                let b = self.pop(meta)?;
+                self.stack.push(a);
+                self.stack.push(b);
+                *self.pc += 1;
+            }
+            Instruction::Rotate(meta) => {
+                let c = self.pop(meta)?;
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                self.stack.push(c);
+                self.stack.push(a);
+                self.stack.push(b);
+                *self.pc += 1;
+            }
+            Instruction::Pop(meta) => {
+                self.pop(meta)?;
+                *self.pc += 1;
+            }
+
+            // ── 算术运算 ────────────────────────────────────────
+            Instruction::Add(meta) => {
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                self.stack.push(a + b);
+                *self.pc += 1;
+            }
+            Instruction::Sub(meta) => {
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                self.stack.push(a - b);
+                *self.pc += 1;
+            }
+            Instruction::Mul(meta) => {
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                self.stack.push(a * b);
+                *self.pc += 1;
+            }
+            Instruction::Div(meta) => {
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                if b == 0 {
+                    return Err(self.error(ErrorKind::DivisionByZero, meta));
+                }
+                self.stack.push(a / b);
+                *self.pc += 1;
+            }
+            Instruction::Mod(meta) => {
+                let b = self.pop(meta)?;
+                let a = self.pop(meta)?;
+                if b == 0 {
+                    return Err(self.error(ErrorKind::ModuloByZero, meta));
+                }
+                self.stack.push(a % b);
+                *self.pc += 1;
+            }
+            Instruction::Reverse(_) => {
+                self.stack.reverse();
+                *self.pc += 1;
+            }
+
+            // ── 数字 I/O ────────────────────────────────────────
+            Instruction::NumOut(meta) => {
+                let val = self.pop(meta)?;
+                print!("{}", val);
+                io::stdout().flush().map_err(|e| self.error(
+                    ErrorKind::IoError { reason: e.to_string() }, meta
+                ))?;
+                *self.pc += 1;
+            }
+            Instruction::NumIn(meta) => {
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|e| self.error(
+                    ErrorKind::IoError { reason: e.to_string() }, meta
+                ))?;
+                let val: i64 = input.trim().parse().map_err(|_| self.error(
+                    ErrorKind::InvalidIntegerInput, meta
+                ))?;
+                self.stack.push(val);
+                *self.pc += 1;
+            }
+
+            // ── 字符 I/O ────────────────────────────────────────
+            Instruction::CharOut(meta) => {
+                let val = self.pop(meta)?;
+                if val < 0 || val > 127 {
+                    return Err(self.error(ErrorKind::InvalidAscii { value: val }, meta));
+                }
+                print!("{}", val as u8 as char);
+                io::stdout().flush().map_err(|e| self.error(
+                    ErrorKind::IoError { reason: e.to_string() }, meta
+                ))?;
+                *self.pc += 1;
+            }
+            Instruction::CharIn(meta) => {
+                let mut buf = [0u8; 1];
+                io::stdin().read_exact(&mut buf).map_err(|e| self.error(
+                    ErrorKind::IoError { reason: e.to_string() }, meta
+                ))?;
+                self.stack.push(buf[0] as i64);
+                *self.pc += 1;
+            }
+
+            // ── 控制流 ──────────────────────────────────────────
+            Instruction::Mark { .. } => {
+                // Mark 在运行时为 NOP
+                *self.pc += 1;
+            }
+            Instruction::Jump { name, meta } => {
+                let target = *self.marks.get(name)
+                    .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }, meta))?;
+                let cond = self.pop(meta)?;
+                if cond != 0 {
+                    *self.pc = target;
+                } else {
+                    *self.pc += 1;
+                }
+            }
+            Instruction::UnconditionalJump { name, meta } => {
+                let target = *self.marks.get(name)
+                    .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }, meta))?;
+                *self.pc = target;
+            }
+
+            // ── 函数调用 ────────────────────────────────────────
+            Instruction::Call { name, argc, meta } => {
+                if self.is_main {
+                    // 主程序 Call: 返回调用信息让 VM 层处理
+                    return Ok(Some((*name, *argc, meta.clone())));
+                } else {
+                    return Err(self.error(ErrorKind::CallInsideFunction, meta));
+                }
+            }
+        }
+        Ok(None)
+    }
+}
+
+// ============================================================================
+// VM 实现 — 生命周期管理 + 函数调用栈
+// ============================================================================
 
 impl VM {
     pub fn new(parse_result: ParseResult) -> Self {
@@ -14,169 +216,57 @@ impl VM {
         }
     }
 
-    /// 构造一个不带位置信息的 StardustError
-    fn error(&self, kind: ErrorKind) -> StardustError {
-        StardustError::new(kind, None)
-    }
-
     /// 运行主程序直到结束或出错
     pub fn run(&mut self) -> Result<(), StardustError> {
         while !self.halted && self.pc < self.main_instructions.len() {
-            let inst = self.main_instructions[self.pc].clone();
-            self.execute_instruction(inst, true)?;
-        }
-        Ok(())
-    }
+            // 先读取下一条指令（self.pc 是 Copy，不产生借用冲突）
+            let pc = self.pc;
+            let inst = self.main_instructions[pc].clone();
 
-    /// 执行单条指令，is_main 表示是否在主程序中（影响 Mark 和 Jump 的上下文）
-    fn execute_instruction(&mut self, inst: Instruction, is_main: bool) -> Result<(), StardustError> {
-        match inst {
-            Instruction::Push(val) => {
-                self.main_stack.push(val);
-                self.pc += 1;
-            }
-            Instruction::Dup => {
-                let top = self.pop_main()?;
-                self.main_stack.push(top);
-                self.main_stack.push(top);
-                self.pc += 1;
-            }
-            Instruction::Swap => {
-                let a = self.pop_main()?;
-                let b = self.pop_main()?;
-                self.main_stack.push(a);
-                self.main_stack.push(b);
-                self.pc += 1;
-            }
-            Instruction::Rotate => {
-                let c = self.pop_main()?;
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                self.main_stack.push(c);
-                self.main_stack.push(a);
-                self.main_stack.push(b);
-                self.pc += 1;
-            }
-            Instruction::Pop => {
-                self.pop_main()?;
-                self.pc += 1;
-            }
-            Instruction::Add => {
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                self.main_stack.push(a + b);
-                self.pc += 1;
-            }
-            Instruction::Sub => {
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                self.main_stack.push(a - b);
-                self.pc += 1;
-            }
-            Instruction::Mul => {
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                self.main_stack.push(a * b);
-                self.pc += 1;
-            }
-            Instruction::Div => {
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                if b == 0 {
-                    return Err(self.error(ErrorKind::DivisionByZero));
-                }
-                self.main_stack.push(a / b);
-                self.pc += 1;
-            }
-            Instruction::Mod => {
-                let b = self.pop_main()?;
-                let a = self.pop_main()?;
-                if b == 0 {
-                    return Err(self.error(ErrorKind::ModuloByZero));
-                }
-                self.main_stack.push(a % b);
-                self.pc += 1;
-            }
-            Instruction::Reverse => {
-                self.main_stack.reverse();
-                self.pc += 1;
-            }
-            Instruction::NumOut => {
-                let val = self.pop_main()?;
-                print!("{}", val);
-                io::stdout().flush().map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                self.pc += 1;
-            }
-            Instruction::NumIn => {
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                let val: i64 = input.trim().parse().map_err(|_| self.error(ErrorKind::InvalidIntegerInput))?;
-                self.main_stack.push(val);
-                self.pc += 1;
-            }
-            Instruction::CharOut => {
-                let val = self.pop_main()?;
-                if val < 0 || val > 127 {
-                    return Err(self.error(ErrorKind::InvalidAscii { value: val }));
-                }
-                print!("{}", val as u8 as char);
-                io::stdout().flush().map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                self.pc += 1;
-            }
-            Instruction::CharIn => {
-                let mut buf = [0u8; 1];
-                io::stdin().read_exact(&mut buf).map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                self.main_stack.push(buf[0] as i64);
-                self.pc += 1;
-            }
-            Instruction::Mark { .. } if is_main => {
-                // 主程序中的 Mark 仅在解析时记录位置，运行时视为无操作
-                self.pc += 1;
-            }
-            Instruction::Jump { name } if is_main => {
-                let target = *self.main_marks.get(&name)
-                    .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name }))?;
-                let cond = self.pop_main()?;   // 弹出栈顶条件值
-                if cond != 0 {
-                    self.pc = target;
-                } else {
+            let mut executor = StackExecutor::new(
+                &mut self.main_stack,
+                &mut self.pc,
+                &self.main_marks,
+                true,
+            );
+
+            match executor.execute(&inst)? {
+                Some((name, argc, meta)) => {
+                    // drop executor 释放对 self 的借用
+                    drop(executor);
+                    self.handle_function_call(name, argc, meta)?;
                     self.pc += 1;
                 }
-            }
-            Instruction::UnconditionalJump { name } if is_main => {
-                let target = *self.main_marks.get(&name)
-                    .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name }))?;
-                self.pc = target;
-            }
-            Instruction::Call { name, argc } if is_main => {
-                self.handle_function_call(name, argc)?;
-                self.pc += 1;
-            }
-            _ => {
-                return Err(self.error(ErrorKind::InvalidInstructionContext));
+                None => { /* 指令已被 executor 处理 */ }
             }
         }
         Ok(())
     }
 
-    fn pop_main(&mut self) -> Result<i64, StardustError> {
-        self.main_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))
-    }
-
-    /// 处理函数调用
-    fn handle_function_call(&mut self, func_name: usize, argc: usize) -> Result<(), StardustError> {
-        // 获取函数体
+    /// 处理函数调用 — 创建独立栈、执行函数体、合并结果
+    fn handle_function_call(
+        &mut self,
+        func_name: usize,
+        argc: usize,
+        call_meta: InstrMeta,
+    ) -> Result<(), StardustError> {
         let body = self.functions.get(&func_name)
-            .ok_or_else(|| self.error(ErrorKind::UndefinedFunction { name: func_name }))?
+            .ok_or_else(|| StardustError::new(
+                ErrorKind::UndefinedFunction { name: func_name },
+                Some(call_meta.span.clone()),
+            ))?
             .clone();
 
         // 从主栈弹出 argc 个参数
         if self.main_stack.len() < argc {
-            return Err(self.error(ErrorKind::NotEnoughArguments {
-                func: func_name,
-                expected: argc,
-                actual: self.main_stack.len(),
-            }));
+            return Err(StardustError::new(
+                ErrorKind::NotEnoughArguments {
+                    func: func_name,
+                    expected: argc,
+                    actual: self.main_stack.len(),
+                },
+                Some(call_meta.span.clone()),
+            ));
         }
 
         let mut args = Vec::with_capacity(argc);
@@ -184,153 +274,34 @@ impl VM {
             args.push(self.main_stack.pop().unwrap());
         }
         args.reverse();
-
         let mut new_stack: Vec<i64> = args;
 
         // 解析函数体内的标志
         let mut local_marks: HashMap<usize, usize> = HashMap::new();
         for (idx, inst) in body.iter().enumerate() {
-            if let Instruction::Mark { name, span } = inst {
+            if let Instruction::Mark { name, meta } = inst {
                 if local_marks.insert(*name, idx).is_some() {
                     return Err(StardustError::new(
                         ErrorKind::DuplicateMark { name: *name },
-                        Some(span.clone()),
+                        Some(meta.span.clone()),
                     ));
                 }
             }
         }
 
-        // 执行函数体
-        let mut local_pc = 0;
+        // 使用 StackExecutor 逐条执行函数体
+        let mut local_pc: usize = 0;
         while local_pc < body.len() {
-            let inst = &body[local_pc];
-            match inst {
-                Instruction::Push(val) => {
-                    new_stack.push(*val);
-                    local_pc += 1;
-                }
-                Instruction::Dup => {
-                    let top = *new_stack.last().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    new_stack.push(top);
-                    local_pc += 1;
-                }
-                Instruction::Swap => {
-                    if new_stack.len() < 2 {
-                        return Err(self.error(ErrorKind::StackUnderflow));
-                    }
-                    let a = new_stack.pop().unwrap();
-                    let b = new_stack.pop().unwrap();
-                    new_stack.push(a);
-                    new_stack.push(b);
-                    local_pc += 1;
-                }
-                Instruction::Rotate => {
-                    if new_stack.len() < 3 {
-                        return Err(self.error(ErrorKind::StackUnderflow));
-                    }
-                    let c = new_stack.pop().unwrap();
-                    let b = new_stack.pop().unwrap();
-                    let a = new_stack.pop().unwrap();
-                    new_stack.push(c);
-                    new_stack.push(a);
-                    new_stack.push(b);
-                    local_pc += 1;
-                }
-                Instruction::Pop => {
-                    new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    local_pc += 1;
-                }
-                Instruction::Add => {
-                    let b = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    let a = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    new_stack.push(a + b);
-                    local_pc += 1;
-                }
-                Instruction::Sub => {
-                    let b = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    let a = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    new_stack.push(a - b);
-                    local_pc += 1;
-                }
-                Instruction::Mul => {
-                    let b = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    let a = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    new_stack.push(a * b);
-                    local_pc += 1;
-                }
-                Instruction::Div => {
-                    let b = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    let a = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    if b == 0 {
-                        return Err(self.error(ErrorKind::DivisionByZero));
-                    }
-                    new_stack.push(a / b);
-                    local_pc += 1;
-                }
-                Instruction::Mod => {
-                    let b = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    let a = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    if b == 0 {
-                        return Err(self.error(ErrorKind::ModuloByZero));
-                    }
-                    new_stack.push(a % b);
-                    local_pc += 1;
-                }
-                Instruction::Reverse => {
-                    new_stack.reverse();
-                    local_pc += 1;
-                }
-                Instruction::NumOut => {
-                    let val = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    print!("{}", val);
-                    io::stdout().flush().map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                    local_pc += 1;
-                }
-                Instruction::NumIn => {
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input).map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                    let val: i64 = input.trim().parse().map_err(|_| self.error(ErrorKind::InvalidIntegerInput))?;
-                    new_stack.push(val);
-                    local_pc += 1;
-                }
-                Instruction::CharOut => {
-                    let val = new_stack.pop().ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    if val < 0 || val > 127 {
-                        return Err(self.error(ErrorKind::InvalidAscii { value: val }));
-                    }
-                    print!("{}", val as u8 as char);
-                    io::stdout().flush().map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                    local_pc += 1;
-                }
-                Instruction::CharIn => {
-                    let mut buf = [0u8; 1];
-                    io::stdin().read_exact(&mut buf).map_err(|e| self.error(ErrorKind::IoError { reason: e.to_string() }))?;
-                    new_stack.push(buf[0] as i64);
-                    local_pc += 1;
-                }
-                Instruction::Mark { .. } => {
-                    local_pc += 1;
-                }
-                Instruction::Jump { name } => {
-                    let target = *local_marks.get(name)
-                        .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
-                    let cond = new_stack.pop()
-                        .ok_or_else(|| self.error(ErrorKind::StackUnderflow))?;
-                    if cond != 0 {
-                        local_pc = target;
-                    } else {
-                        local_pc += 1;
-                    }
-                }
-                Instruction::UnconditionalJump { name } => {
-                    let target = *local_marks.get(name)
-                        .ok_or_else(|| self.error(ErrorKind::UndefinedMark { name: *name }))?;
-                    local_pc = target;
-                }
-                Instruction::Call { .. } => {
-                    return Err(self.error(ErrorKind::CallInsideFunction));
-                }
-            }
+            let inst = body[local_pc].clone();
+
+            let mut executor = StackExecutor::new(
+                &mut new_stack,
+                &mut local_pc,
+                &local_marks,
+                false, // 函数内不允许 Call
+            );
+
+            executor.execute(&inst)?; // 函数内 Call 会返回 CallInsideFunction 错误
         }
 
         // 将新栈内容合并回主栈

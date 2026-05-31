@@ -19,35 +19,28 @@
 - 或者移除 `preprocess` 复杂路径，统一使用 `simple_preprocess`（直接将 ASCII 码作为 Push 值压栈）
 - 如果保留，将 `HELLO_WORLD` 用作示例或从代码中移除
 
-### 2. VM 中存在大量代码重复
+### 2. ~~VM 中存在大量代码重复~~ ✅ 已解决
 
 **文件:** `src/stardust/vm.rs`
 
-`execute_instruction()`（操作 `self.main_stack`）和 `handle_function_call()` 中的函数体执行循环（操作 `new_stack`）对每条指令的实现几乎完全相同，区别仅在于操作的栈不同。约 200 行重复代码。
+~~`execute_instruction()`（操作 `self.main_stack`）和 `handle_function_call()` 中的函数体执行循环（操作 `new_stack`）对每条指令的实现几乎完全相同，区别仅在于操作的栈不同。约 200 行重复代码。~~
 
-**建议:**
-- 提取一个通用的栈执行器结构体，封装 `stack: Vec<i64>`、`pc: usize`、`marks: HashMap<usize, usize>` 和指令执行逻辑
-- 或者为栈操作定义一个 trait，让主程序和函数调用共享同一套指令执行代码
-- 这样新增指令时只需修改一处，降低维护成本和出错风险
+**解决方案:**
+- 提取了 `StackExecutor` 结构体，封装了 `stack: &mut Vec<i64>`、`pc: &mut usize`、`marks: &HashMap<usize, usize>` 和统一的指令执行逻辑
+- `execute_instruction()` 和函数体执行循环现在共享同一套代码（~180 行）
+- VM 职责回归到生命周期管理（调用栈、函数库）
 
-### 3. 运行时错误缺少源码位置信息
+### 3. ~~运行时错误缺少源码位置信息~~ ✅ 已解决
 
-**文件:** `src/stardust/vm.rs`
+**文件:** `src/stardust/vm.rs`, `src/stardust/mod.rs`, `src/stardust/parser.rs`
 
-VM 中所有运行时错误通过 `self.error(kind)` 创建，`span` 字段永远为 `None`：
+~~VM 中所有运行时错误通过 `self.error(kind)` 创建，`span` 字段永远为 `None`。~~
 
-```rust
-fn error(&self, kind: ErrorKind) -> StardustError {
-    StardustError::new(kind, None)
-}
-```
-
-运行时栈下溢、除零等错误无法定位到源码行号，调试体验差。
-
-**建议:**
-- 在 `Instruction` 枚举中为每条指令保存对应的 `SourceSpan`（或保存原始 Token）
-- 执行指令时用指令携带的位置信息构造错误
-- 这样 `print_error()` 就能在运行时错误中展示源码位置
+**解决方案:**
+- 新增 `InstrMeta` 结构体（含 `SourceSpan`），附加到每条 `Instruction` 变体上
+- Parser 在构造 Instruction 时从 Token 提取位置信息填入 InstrMeta
+- VM 执行指令时使用 `InstrMeta.span` 创建带源码位置的错误
+- 运行时错误（栈下溢、除零、无效 ASCII 等）现在都能精确定位到源码行号
 
 ---
 
@@ -302,8 +295,8 @@ assert_eq!(tokens[1].token_type, TokenType::Star);
 | 优先级 | 编号 | 改进项 |
 |--------|------|--------|
 | 🔴 高 | 1 | 补全 `char2sd_list.rs` 字符映射或统一使用 simple_preprocess |
-| 🔴 高 | 2 | 重构 VM 消除重复代码 |
-| 🔴 高 | 3 | 为 VM 运行时错误添加源码位置信息 |
+| 🔴 高 | 2 | ✅ 重构 VM 消除重复代码 |
+| 🔴 高 | 3 | ✅ 为 VM 运行时错误添加源码位置信息 |
 | 🟡 中 | 5 | 添加算术溢出检查 |
 | 🟡 中 | 6 | 解析阶段验证 Mark 引用 |
 | 🟡 中 | 12 | 消除 Lexer 中注释处理的代码重复 |
