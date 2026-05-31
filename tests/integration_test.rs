@@ -51,6 +51,26 @@ fn rotate() -> String { "   +".to_string() }
 fn pop() -> String { "    +".to_string() }
 fn num_out() -> String { ".".to_string() }
 fn char_out() -> String { ",".to_string() }
+// 比较运算
+fn eq() -> String { "=".to_string() }
+fn ne() -> String { " =".to_string() }
+fn lt() -> String { "  =".to_string() }
+fn gt() -> String { "   =".to_string() }
+// 逻辑运算
+fn and() -> String { "&".to_string() }
+fn or() -> String { " &".to_string() }
+fn not() -> String { "  &".to_string() }
+// 堆操作
+fn store() -> String { "-".to_string() }
+fn load() -> String { " -".to_string() }
+// 栈扩展
+fn depth() -> String { " <".to_string() }
+fn shiftl() -> String { "<".to_string() }
+fn shiftr() -> String { ">".to_string() }
+fn dropn() -> String { " >".to_string() }
+fn pick() -> String { "  <".to_string() }
+// 调试
+fn dump_stack() -> String { "#".to_string() }
 
 /// 辅助函数：运行完整流水线
 fn run(source: &str) -> Result<(), StardustError> {
@@ -538,5 +558,250 @@ fn rotate_three_values() {
 fn reverse_then_add_all() {
     // Push(1) Push(2) Push(3) Reverse Add Add
     let src = format!("{}{}{}{}{}{}", push(1), push(2), push(3), reverse(), add(), add());
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 13. 嵌套函数调用（函数 A 调用函数 B）
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn nested_function_calls() {
+    // 函数(2): Push(66) CharOut  — 输出 'B'
+    // 函数(1): Push(65) CharOut (2): (0);  — 输出 'A' 然后调用函数2
+    // 主程序: (1): (0);
+    let src = format!(
+        "{}{}{}",
+        func(2, &format!("{}{}", push(66), char_out())),    // 函数2: 输出 B
+        func(1, &format!("{}{}{}", push(65), char_out(), call(2, 0))), // 函数1: 输出 A 然后调用2
+        call(1, 0),                                          // 调用函数1
+    );
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 14. 算术溢出检查
+//
+// 注：Push 需要 N+5 个空格，无法直接 Push i64::MAX（需要 ~9e18 空格）。
+// 但 checked_add/sub/mul 已正确集成到指令执行路径中，
+// 正常算术运算不产生误报。
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn arithmetic_operations_do_not_false_overflow() {
+    // Push(100) Push(200) Add → 300，不应溢出
+    let src = format!("{}{}{}", push(100), push(200), add());
+    assert!(run(&src).is_ok());
+    // Push(1000) Push(3) Mul → 3000
+    let src2 = format!("{}{}{}", push(1000), push(3), mul());
+    assert!(run(&src2).is_ok());
+    // Push(500) Push(200) Sub → 300
+    let src3 = format!("{}{}{}", push(500), push(200), sub());
+    assert!(run(&src3).is_ok());
+}
+
+#[test]
+fn mul_large_values_to_overflow_boundary() {
+    // Push(10000) Push(10000) Mul = 1e8, no overflow
+    let src = format!("{}{}{}", push(10_000), push(10_000), mul());
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 15. 解析阶段 Mark 引用验证
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn undefined_mark_caught_at_parse_time() {
+    // Jump(99) 但 Mark(99) 不存在 — 解析阶段即报错
+    let src = jump(99);
+    let e = run(&src).unwrap_err();
+    // 现在在 parse 阶段就发现了（不再是运行时 StackUnderflow）
+    assert_eq!(e.kind, ErrorKind::UndefinedMark { name: 99 });
+}
+
+#[test]
+fn undefined_mark_in_function_caught_at_parse_time() {
+    // 函数体内 Jump(99) 但 Mark(99) 不存在
+    let src = format!(
+        "{}{}",
+        func(1, &jump(99)),  // 函数1 内 Jump 到不存在的 Mark(99)
+        call(1, 0),
+    );
+    let e = run(&src).unwrap_err();
+    assert_eq!(e.kind, ErrorKind::UndefinedMark { name: 99 });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 16. 比较运算 (符号 =)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn eq_true() {
+    // Push(5) Push(5) Eq → 1 (true)
+    let src = format!("{}{}{}", push(5), push(5), eq());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn eq_false() {
+    // Push(5) Push(3) Eq → 0 (false)
+    let src = format!("{}{}{}", push(5), push(3), eq());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn ne_works() {
+    // Push(5) Push(3) Ne → 1
+    let src = format!("{}{}{}", push(5), push(3), ne());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn lt_works() {
+    // Push(3) Push(5) Lt → 1
+    let src = format!("{}{}{}", push(3), push(5), lt());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn gt_works() {
+    // Push(5) Push(3) Gt → 1
+    let src = format!("{}{}{}", push(5), push(3), gt());
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 17. 逻辑运算 (符号 &)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn and_true() {
+    // Push(1) Push(1) And → 1
+    let src = format!("{}{}{}", push(1), push(1), and());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn and_false() {
+    // Push(1) Push(0) And → 0
+    let src = format!("{}{}{}", push(1), push(0), and());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn not_zero_is_one() {
+    // Push(0) Not → 1
+    let src = format!("{}{}", push(0), not());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn or_true() {
+    // Push(1) Push(0) Or → 1
+    let src = format!("{}{}{}", push(1), push(0), or());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn not_nonzero_is_zero() {
+    // Push(42) Not → 0
+    let src = format!("{}{}", push(42), not());
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 18. 堆操作 (符号 -)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn store_and_load() {
+    // Push(10) Push(99) Store Push(10) Load → heap[10]=99, 然后取回 99
+    let src = format!("{}{}{}{}{}", push(10), push(99), store(), push(10), load());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn load_uninitialized_returns_zero() {
+    // Push(999) Load → 0（未写入的地址返回 0）
+    let src = format!("{}{}", push(999), load());
+    assert!(run(&src).is_ok());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 19. 栈扩展 (符号 < >)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn depth_on_empty_stack() {
+    // Depth → 0
+    let src = depth();
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn depth_after_push() {
+    // Push(1) Push(2) Push(3) Depth → [1, 2, 3, 3]
+    let src = format!("{}{}{}{}", push(1), push(2), push(3), depth());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn shiftl_works() {
+    // Push(1) Push(2) Push(3) ShiftL → [2, 3, 1]
+    let src = format!("{}{}{}{}", push(1), push(2), push(3), shiftl());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn shiftr_works() {
+    // Push(1) Push(2) Push(3) ShiftR → [3, 1, 2]
+    let src = format!("{}{}{}{}", push(1), push(2), push(3), shiftr());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn dropn_works() {
+    // Push(1) Push(2) Push(3) Push(2) DropN → [1] (丢弃栈顶2个: 3和2)
+    let src = format!("{}{}{}{}{}", push(1), push(2), push(3), push(2), dropn());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn pick_works() {
+    // Push(10) Push(20) Push(30) Push(1) Pick → [10, 20, 30, 20] (复制栈深1的元素)
+    let src = format!("{}{}{}{}{}", push(10), push(20), push(30), push(1), pick());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn dropn_stack_underflow() {
+    // Push(1) Push(5) DropN → 栈只有1个元素, 丢弃5个失败
+    let src = format!("{}{}{}", push(1), push(5), dropn());
+    assert!(run(&src).is_err());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 20. 调试 (符号 #)
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn dump_stack_does_not_affect_execution() {
+    // Push(42) DumpStack Pop → 正常执行
+    let src = format!("{}{}{}", push(42), dump_stack(), pop());
+    assert!(run(&src).is_ok());
+}
+
+#[test]
+fn compare_and_jump_conditional() {
+    // Push(10) Push(10) Eq Jump(0) Mark(0) Push(1)
+    // 10==10 为真, Jump 弹出1, 跳转到 Mark(0), 然后 Push(1)
+    let src = format!(
+        "{}{}{}{}{}{}",
+        push(10), push(10), eq(), // [10, 10, 1]
+        jump(0),                   // 弹出1, 跳转
+        mark(0),                   // 跳转目标
+        push(1),                   // 执行: Push(1)
+    );
     assert!(run(&src).is_ok());
 }

@@ -47,6 +47,8 @@ impl Parser {
             self.parse_top_level()?;
         }
         self.resolve_main_marks()?;
+        self.validate_mark_references()?;
+        self.validate_function_mark_references()?;
         Ok(ParseResult {
             main_instructions: self.instructions,
             main_marks: self.marks,
@@ -185,6 +187,44 @@ impl Parser {
                 1 => return Ok(Instruction::CharIn(meta)),
                 _ => ErrorKind::InvalidSpacesForComma { spaces },
             },
+            TokenType::Equals => match spaces {
+                0 => return Ok(Instruction::Eq(meta)),
+                1 => return Ok(Instruction::Ne(meta)),
+                2 => return Ok(Instruction::Lt(meta)),
+                3 => return Ok(Instruction::Gt(meta)),
+                4 => return Ok(Instruction::Le(meta)),
+                5 => return Ok(Instruction::Ge(meta)),
+                _ => ErrorKind::InvalidSpacesForEquals { spaces },
+            },
+            TokenType::Ampersand => match spaces {
+                0 => return Ok(Instruction::And(meta)),
+                1 => return Ok(Instruction::Or(meta)),
+                2 => return Ok(Instruction::Not(meta)),
+                3 => return Ok(Instruction::Xor(meta)),
+                _ => ErrorKind::InvalidSpacesForAmpersand { spaces },
+            },
+            TokenType::Hyphen => match spaces {
+                0 => return Ok(Instruction::Store(meta)),
+                1 => return Ok(Instruction::Load(meta)),
+                _ => ErrorKind::InvalidSpacesForHyphen { spaces },
+            },
+            TokenType::AngleLeft => match spaces {
+                0 => return Ok(Instruction::ShiftL(meta)),
+                1 => return Ok(Instruction::Depth(meta)),
+                2 => return Ok(Instruction::Pick(meta)),
+                _ => ErrorKind::InvalidSpacesForAngleLeft { spaces },
+            },
+            TokenType::AngleRight => match spaces {
+                0 => return Ok(Instruction::ShiftR(meta)),
+                1 => return Ok(Instruction::DropN(meta)),
+                _ => ErrorKind::InvalidSpacesForAngleRight { spaces },
+            },
+            TokenType::Hash => match spaces {
+                0 => return Ok(Instruction::DumpStack(meta)),
+                1 => return Ok(Instruction::DumpState(meta)),
+                2 => return Ok(Instruction::Breakpoint(meta)),
+                _ => ErrorKind::InvalidSpacesForHash { spaces },
+            },
             TokenType::Backtick => return Ok(Instruction::Mark {
                 name: spaces,
                 meta,
@@ -208,6 +248,61 @@ impl Parser {
                         ErrorKind::DuplicateMark { name: *name },
                         Some(meta.span.clone()),
                     ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// 验证主程序中所有 Jump/UnconditionalJump 引用的 Mark 是否存在
+    ///
+    /// 这消除了原先仅在运行时才能发现的 UndefinedMark 错误。
+    fn validate_mark_references(&self) -> Result<(), StardustError> {
+        for inst in &self.instructions {
+            match inst {
+                Instruction::Jump { name, meta } |
+                Instruction::UnconditionalJump { name, meta } => {
+                    if !self.marks.contains_key(name) {
+                        return Err(StardustError::new(
+                            ErrorKind::UndefinedMark { name: *name },
+                            Some(meta.span.clone()),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// 验证所有函数体内的 Mark 引用完整性
+    fn validate_function_mark_references(&self) -> Result<(), StardustError> {
+        for (_func_name, body) in &self.functions {
+            // 收集该函数体内的 marks
+            let mut func_marks: HashMap<usize, usize> = HashMap::new();
+            for (idx, inst) in body.iter().enumerate() {
+                if let Instruction::Mark { name, meta } = inst {
+                    if func_marks.insert(*name, idx).is_some() {
+                        return Err(StardustError::new(
+                            ErrorKind::DuplicateMark { name: *name },
+                            Some(meta.span.clone()),
+                        ));
+                    }
+                }
+            }
+            // 验证该函数体内的 Jump/UnconditionalJump 引用
+            for inst in body {
+                match inst {
+                    Instruction::Jump { name, meta } |
+                    Instruction::UnconditionalJump { name, meta } => {
+                        if !func_marks.contains_key(name) {
+                            return Err(StardustError::new(
+                                ErrorKind::UndefinedMark { name: *name },
+                                Some(meta.span.clone()),
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -417,14 +512,32 @@ mod tests {
 
     #[test]
     fn jump_with_name_3() {
-        let result = parse_program(vec![quote(3)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::Jump { name: 3, meta: meta() }]);
+        // 需要先声明 Mark(3) 才能 Jump 引用它（解析阶段验证）
+        let result = parse_program(vec![backtick(3), quote(3)]).unwrap();
+        assert_eq!(result.main_instructions[0], Instruction::Mark { name: 3, meta: meta() });
+        assert_eq!(result.main_instructions[1], Instruction::Jump { name: 3, meta: meta() });
     }
 
     #[test]
     fn unconditional_jump() {
-        let result = parse_program(vec![tilde(7)]).unwrap();
-        assert_eq!(result.main_instructions, vec![Instruction::UnconditionalJump { name: 7, meta: meta() }]);
+        let result = parse_program(vec![backtick(7), tilde(7)]).unwrap();
+        assert_eq!(result.main_instructions[0], Instruction::Mark { name: 7, meta: meta() });
+        assert_eq!(result.main_instructions[1], Instruction::UnconditionalJump { name: 7, meta: meta() });
+    }
+
+    #[test]
+    fn jump_to_undefined_mark_is_parse_error() {
+        // Jump 引用不存在的 Mark 在解析阶段就报错
+        let result = parse_program(vec![quote(99)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::UndefinedMark { name: 99 });
+    }
+
+    #[test]
+    fn uncond_jump_to_undefined_mark_is_parse_error() {
+        let result = parse_program(vec![tilde(99)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::UndefinedMark { name: 99 });
     }
 
     // ═══════════ 5. 重复标志错误 ═══════════
@@ -632,5 +745,130 @@ mod tests {
             }
             _ => panic!("expected Mark with span"),
         }
+    }
+
+    // ═══════════ 12. 比较运算 (符号 =) ═══════════
+
+    #[test]
+    fn eq_0_equals() {
+        let result = parse_program(vec![tok(0, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Eq(meta())]);
+    }
+
+    #[test]
+    fn ne_1_equals() {
+        let result = parse_program(vec![tok(1, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Ne(meta())]);
+    }
+
+    #[test]
+    fn lt_2_equals() {
+        let result = parse_program(vec![tok(2, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Lt(meta())]);
+    }
+
+    #[test]
+    fn gt_3_equals() {
+        let result = parse_program(vec![tok(3, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Gt(meta())]);
+    }
+
+    #[test]
+    fn le_4_equals() {
+        let result = parse_program(vec![tok(4, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Le(meta())]);
+    }
+
+    #[test]
+    fn ge_5_equals() {
+        let result = parse_program(vec![tok(5, TokenType::Equals)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Ge(meta())]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_equals() {
+        let result = parse_program(vec![tok(6, TokenType::Equals)]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForEquals { spaces: 6 });
+    }
+
+    // ═══════════ 13. 逻辑运算 (符号 &) ═══════════
+
+    #[test]
+    fn and_0_ampersand() {
+        let result = parse_program(vec![tok(0, TokenType::Ampersand)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::And(meta())]);
+    }
+
+    #[test]
+    fn not_2_ampersand() {
+        let result = parse_program(vec![tok(2, TokenType::Ampersand)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Not(meta())]);
+    }
+
+    // ═══════════ 14. 堆操作 (符号 -) ═══════════
+
+    #[test]
+    fn store_0_hyphen() {
+        let result = parse_program(vec![tok(0, TokenType::Hyphen)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Store(meta())]);
+    }
+
+    #[test]
+    fn load_1_hyphen() {
+        let result = parse_program(vec![tok(1, TokenType::Hyphen)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Load(meta())]);
+    }
+
+    // ═══════════ 15. 栈扩展 (符号 < >) ═══════════
+
+    #[test]
+    fn shiftl_0_angleleft() {
+        let result = parse_program(vec![tok(0, TokenType::AngleLeft)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::ShiftL(meta())]);
+    }
+
+    #[test]
+    fn depth_1_angleleft() {
+        let result = parse_program(vec![tok(1, TokenType::AngleLeft)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Depth(meta())]);
+    }
+
+    #[test]
+    fn pick_2_angleleft() {
+        let result = parse_program(vec![tok(2, TokenType::AngleLeft)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Pick(meta())]);
+    }
+
+    #[test]
+    fn shiftr_0_angleright() {
+        let result = parse_program(vec![tok(0, TokenType::AngleRight)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::ShiftR(meta())]);
+    }
+
+    #[test]
+    fn dropn_1_angleright() {
+        let result = parse_program(vec![tok(1, TokenType::AngleRight)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::DropN(meta())]);
+    }
+
+    // ═══════════ 16. 调试 (符号 #) ═══════════
+
+    #[test]
+    fn dumpstack_0_hash() {
+        let result = parse_program(vec![tok(0, TokenType::Hash)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::DumpStack(meta())]);
+    }
+
+    #[test]
+    fn dumpstate_1_hash() {
+        let result = parse_program(vec![tok(1, TokenType::Hash)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::DumpState(meta())]);
+    }
+
+    #[test]
+    fn breakpoint_2_hash() {
+        let result = parse_program(vec![tok(2, TokenType::Hash)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::Breakpoint(meta())]);
     }
 }

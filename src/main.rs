@@ -2,7 +2,7 @@ use esolang_stardust::extension::unwind::simple_preprocess;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
 use esolang_stardust::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
-use esolang_stardust::stardust::VM;
+use esolang_stardust::stardust::{StardustError, VM};
 use std::{env, fs, process};
 
 // TODO:转译为Rust/C代码，实现编译为可执行文件
@@ -39,14 +39,9 @@ fn stardust(args: Vec<String>) {
 }
 
 /// 获取源文件的 unwinded 源码（预处理后）
-fn read_and_unwind(filename: &str) -> Result<(String, String), String> {
-    let source = fs::read_to_string(filename)
-        .map_err(|e| format!("Error reading file '{}': {}", filename, e))?;
-
-    let unwind_source = simple_preprocess(&source)
-        .map(|uw| uw.into_owned())
-        .map_err(|e| format!("Preprocess error: {}", e))?;
-
+fn read_and_unwind(filename: &str) -> Result<(String, String), StardustError> {
+    let source = fs::read_to_string(filename)?;
+    let unwind_source = simple_preprocess(&source)?.into_owned();
     Ok((source, unwind_source))
 }
 
@@ -93,11 +88,13 @@ fn cmd_check(args: &[String]) {
     }
     let filename = &args[2];
 
-    let (_, unwind_source) = read_and_unwind(filename).unwrap_or_else(|e| {
-        // IO 错误输出为 JSON
-        println!(r#"{{"status":"error","diagnostics":[{{"severity":"error","line":1,"column":1,"message":"{}","code":"IOError"}}]}}"#, e);
-        process::exit(1);
-    });
+    let (_, unwind_source) = match read_and_unwind(filename) {
+        Ok(v) => v,
+        Err(e) => {
+            print_json_diagnostics(&[&e]);
+            process::exit(1);
+        }
+    };
 
     let tokens = match tokenize(&unwind_source) {
         Ok(toks) => toks,
@@ -126,10 +123,13 @@ fn cmd_tokens(args: &[String]) {
     }
     let filename = &args[2];
 
-    let (_, unwind_source) = read_and_unwind(filename).unwrap_or_else(|e| {
-        println!(r#"{{"tokens":[],"error":"{}"}}"#, e);
-        process::exit(1);
-    });
+    let (_, unwind_source) = match read_and_unwind(filename) {
+        Ok(v) => v,
+        Err(e) => {
+            println!(r#"{{"tokens":[],"error":"{}"}}"#, e.message);
+            process::exit(1);
+        }
+    };
 
     let tokens = match tokenize(&unwind_source) {
         Ok(toks) => toks,

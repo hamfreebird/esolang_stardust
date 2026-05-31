@@ -37,17 +37,35 @@ impl<'a> Lexer<'a> {
         self.chars.peek()
     }
 
+    /// 消费 `//` 注释内容（调用前已消耗第一个 `/`）。
+    ///
+    /// 若紧随的字符是 `/` 则跳过直到行尾；否则返回 `InvalidAnnotation`。
+    fn skip_comment(&mut self, span: &SourceSpan) -> Result<(), StardustError> {
+        if self.peek() == Some(&'/') {
+            self.advance(); // 消耗第二个 /
+            while let Some(&ch) = self.peek() {
+                if ch == '\n' { break; }
+                self.advance();
+            }
+            Ok(())
+        } else {
+            Err(StardustError::new(ErrorKind::InvalidAnnotation, Some(span.clone())))
+        }
+    }
+
     /// 解析一个 token，忽略非指令空白
     pub fn next_token(&mut self) -> Option<Result<Token, StardustError>> {
         let mut spaces = 0;
-        let start_line = self.line;
-        let start_col = self.column;
-        let span = SourceSpan {
-            line: start_line,
-            column: start_col,
-        };
 
         loop {
+            // 每次循环迭代记录当前位置——确保跳过空白行后行号正确更新
+            let start_line = self.line;
+            let start_col = self.column;
+            let span = SourceSpan {
+                line: start_line,
+                column: start_col,
+            };
+
             match self.peek() {
                 Some(&' ') => {
                     // 进入空格计数模式
@@ -74,21 +92,9 @@ impl<'a> Lexer<'a> {
                             }));
                         }
                         Some(&ch) if is_anno(ch) => {
-                            // 进入注释处理
-                            let token_type = char_to_token_type(ch).unwrap();
-                            self.advance();
-                            if token_type == TokenType::Annotation && (self.peek() == Some(&'/')) {
-                                while let Some(&anno_ch) = self.peek() {
-                                    if anno_ch == '\n' {
-                                        break;
-                                    };
-                                    self.advance();
-                                }
-                            } else {
-                                // 注释没有使用//，只使用了单个/
-                                let err =
-                                    StardustError::new(ErrorKind::InvalidAnnotation, Some(span));
-                                return Some(Err(err));
+                            self.advance(); // 消耗第一个 /
+                            if let Err(e) = self.skip_comment(&span) {
+                                return Some(Err(e));
                             }
                         }
                         Some(&ch) if ch.is_whitespace() => {
@@ -123,20 +129,10 @@ impl<'a> Lexer<'a> {
                     }));
                 }
                 Some(&ch) if is_anno(ch) => {
-                    // 进入注释处理
-                    let token_type = char_to_token_type(ch).unwrap();
-                    self.advance();
-                    if token_type == TokenType::Annotation && (self.peek() == Some(&'/')) {
-                        while let Some(&anno_ch) = self.peek() {
-                            if anno_ch == '\n' {
-                                break;
-                            };
-                            self.advance();
-                        }
-                    } else {
-                        // 注释没有使用//，只使用了单个/
-                        let err = StardustError::new(ErrorKind::InvalidAnnotation, Some(span));
-                        return Some(Err(err));
+                    self.advance(); // 消耗第一个 /
+                    let span = SourceSpan { line: start_line, column: start_col };
+                    if let Err(e) = self.skip_comment(&span) {
+                        return Some(Err(e));
                     }
                 }
                 Some(&ch) if ch.is_whitespace() => {
@@ -433,9 +429,9 @@ mod tests {
         // 第1行: +
         assert_eq!(tokens[0], tok(0, TokenType::Plus, 1, 1, 0));
         // 第2行:  +
-        assert_eq!(tokens[1], tok(1, TokenType::Plus, 1, 2, 3));
+        assert_eq!(tokens[1], tok(1, TokenType::Plus, 2, 1, 3));
         // 第3行:   +
-        assert_eq!(tokens[2], tok(2, TokenType::Plus, 2, 3, 7));
+        assert_eq!(tokens[2], tok(2, TokenType::Plus, 3, 1, 7));
     }
 
     #[test]
@@ -445,7 +441,7 @@ mod tests {
         let tokens = collect_all(source);
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], tok(0, TokenType::Star, 1, 1, 0));
-        assert_eq!(tokens[1], tok(1, TokenType::Plus, 1, 2, 4));
+        assert_eq!(tokens[1], tok(1, TokenType::Plus, 3, 1, 4));
     }
 
     #[test]
@@ -454,7 +450,7 @@ mod tests {
         let tokens = collect_all(source);
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].column, 1);
-        assert_eq!(tokens[1].column, 4);
+        assert_eq!(tokens[1].column, 1); // 空格开始于行首
     }
 
     // ════════════════════════════════════════════════════════════
@@ -484,7 +480,7 @@ mod tests {
         // 第一个 token: 第1行 +
         assert_eq!(tokens[0], tok(0, TokenType::Plus, 1, 1, 0));
         // 第二个 token: 第2行  +
-        assert_eq!(tokens[1], tok(1, TokenType::Plus, 1, 2, 5));
+        assert_eq!(tokens[1], tok(1, TokenType::Plus, 2, 1, 5));
     }
 
     #[test]
@@ -504,7 +500,7 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].token_type, TokenType::Plus);
         assert_eq!(tokens[1].token_type, TokenType::Star);
-        assert_eq!(tokens[1].line, 1); // 跳过3个空行
+        assert_eq!(tokens[1].line, 5); // * 实际在第5行（跳过3个空行）
     }
 
     // ════════════════════════════════════════════════════════════
@@ -547,7 +543,7 @@ mod tests {
         let source = "// comment line\n+\n";
         let tokens = collect_all(source);
         assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], tok(0, TokenType::Plus, 1, 1, 16));
+        assert_eq!(tokens[0], tok(0, TokenType::Plus, 2, 1, 16));
     }
 
     #[test]
@@ -574,7 +570,7 @@ mod tests {
         let tokens = collect_all(source);
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].token_type, TokenType::Plus);
-        assert_eq!(tokens[0].line, 1);
+        assert_eq!(tokens[0].line, 2);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -693,7 +689,7 @@ mod tests {
         let e = err.unwrap();
         assert_eq!(e.kind, ErrorKind::InvalidCharacter { ch: '@' });
         // 错误应定位在第2行第1列
-        assert_eq!(e.span, Some(SourceSpan { line: 1, column: 2 }));
+        assert_eq!(e.span, Some(SourceSpan { line: 2, column: 1 }));
     }
 
     // ════════════════════════════════════════════════════════════
@@ -856,7 +852,7 @@ mod tests {
         let tokens = collect_all(source);
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0], tok(1, TokenType::Backtick, 1, 1, 1));
-        assert_eq!(tokens[1], tok(1, TokenType::Quote, 1, 3, 4));
+        assert_eq!(tokens[1], tok(1, TokenType::Quote, 2, 1, 4));
     }
 
     #[test]

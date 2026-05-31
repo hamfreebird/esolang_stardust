@@ -280,6 +280,26 @@ fn format_instruction(instr: &Instruction) -> String {
         Instruction::Jump { name, .. } => format!("Jump({})", name),
         Instruction::Call { name, argc, .. } => format!("Call(name={}, argc={})", name, argc),
         Instruction::UnconditionalJump { name, .. } => format!("UncondJump({})", name),
+        Instruction::Eq(_) => "Eq".to_string(),
+        Instruction::Ne(_) => "Ne".to_string(),
+        Instruction::Lt(_) => "Lt".to_string(),
+        Instruction::Gt(_) => "Gt".to_string(),
+        Instruction::Le(_) => "Le".to_string(),
+        Instruction::Ge(_) => "Ge".to_string(),
+        Instruction::And(_) => "And".to_string(),
+        Instruction::Or(_) => "Or".to_string(),
+        Instruction::Not(_) => "Not".to_string(),
+        Instruction::Xor(_) => "Xor".to_string(),
+        Instruction::Store(_) => "Store".to_string(),
+        Instruction::Load(_) => "Load".to_string(),
+        Instruction::ShiftL(_) => "ShiftL".to_string(),
+        Instruction::Depth(_) => "Depth".to_string(),
+        Instruction::Pick(_) => "Pick".to_string(),
+        Instruction::ShiftR(_) => "ShiftR".to_string(),
+        Instruction::DropN(_) => "DropN".to_string(),
+        Instruction::DumpStack(_) => "DumpStack".to_string(),
+        Instruction::DumpState(_) => "DumpState".to_string(),
+        Instruction::Breakpoint(_) => "Breakpoint".to_string(),
     }
 }
 
@@ -409,11 +429,14 @@ pub fn print_error(error: &StardustError, source: &str, filename: &str) {
     eprintln!("Error: {}", error.message);
     if let Some(span) = &error.span {
         eprintln!("  --> {}:{}:{}", filename, span.line, span.column);
-        // 打印源代码行
-        if let Some(line) = source.lines().nth(span.line - 1) {
-            eprintln!("   |");
-            eprintln!("{:3} | {}", span.line, line);
-            eprintln!("   | {}{}", " ".repeat(span.column - 1), "^");
+        // 打印源代码行（防御性：line/column 为 0 时不尝试打印）
+        if span.line > 0 {
+            if let Some(line) = source.lines().nth(span.line.saturating_sub(1)) {
+                eprintln!("   |");
+                eprintln!("{:3} | {}", span.line, line);
+                let col = span.column.saturating_sub(1);
+                eprintln!("   | {}{}", " ".repeat(col), "^");
+            }
         }
     }
     if let ErrorKind::IoError { reason } = &error.kind {

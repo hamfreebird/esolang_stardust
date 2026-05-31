@@ -106,3 +106,124 @@ pub fn simple_preprocess(input: &str) -> Result<Cow<'_, str>, StardustError> {
 
     Ok(Cow::Owned(result))
 }
+
+// ============================================================================
+// 测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── simple_preprocess ──────────────────────────────────────────────────
+
+    #[test]
+    fn simple_empty_returns_empty() {
+        let result = simple_preprocess("").unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn simple_symbols_unchanged() {
+        let result = simple_preprocess(" +*,").unwrap();
+        assert_eq!(result, " +*,");
+    }
+
+    #[test]
+    fn simple_uppercase_h() {
+        // 'H' = ASCII 72 → (72+5)=77 spaces + '+'
+        let result = simple_preprocess("H").unwrap();
+        assert_eq!(result, format!("{}+", " ".repeat(77)));
+    }
+
+    #[test]
+    fn simple_lowercase_a() {
+        // 'a' = ASCII 97 → (97+5)=102 spaces + '+'
+        let result = simple_preprocess("a").unwrap();
+        assert_eq!(result, format!("{}+", " ".repeat(102)));
+    }
+
+    #[test]
+    fn simple_digit_zero() {
+        // '0' = ASCII 48 → (48+5)=53 spaces + '+'
+        let result = simple_preprocess("0").unwrap();
+        assert_eq!(result, format!("{}+", " ".repeat(53)));
+    }
+
+    #[test]
+    fn simple_mixed_chars_and_symbols() {
+        // "A+" → Push(65) + literal '+'
+        let result = simple_preprocess("A+").unwrap();
+        assert_eq!(result, format!("{}+{}", " ".repeat(70), "+"));
+    }
+
+    #[test]
+    fn simple_output_is_valid_stardust() {
+        // 验证 simple_preprocess 的输出可以被 tokenize 解析
+        use crate::stardust::lexer::tokenize;
+        let result = simple_preprocess("Hi").unwrap();
+        let tokens = tokenize(&result);
+        assert!(tokens.is_ok(), "preprocess output should be tokenizable");
+        let tokens = tokens.unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].spaces, 77);  // H
+        assert_eq!(tokens[1].spaces, 110); // i
+    }
+
+    #[test]
+    fn simple_multiple_chars() {
+        let result = simple_preprocess("AB").unwrap();
+        assert_eq!(result, format!("{}+{}+", " ".repeat(70), " ".repeat(71)));
+    }
+
+    #[test]
+    fn simple_preserves_comments() {
+        let result = simple_preprocess("// Hi").unwrap();
+        assert!(result.contains("//"));
+    }
+
+    // ── preprocess ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn preprocess_empty_borrowed() {
+        let result = preprocess("").unwrap();
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn preprocess_symbols_borrowed() {
+        let result = preprocess(" +*,").unwrap();
+        assert_eq!(result.as_ref(), " +*,");
+    }
+
+    #[test]
+    fn preprocess_uppercase_a() {
+        let result = preprocess("A").unwrap();
+        assert_eq!(result.as_ref(), SD_A);
+    }
+
+    #[test]
+    fn preprocess_lowercase_a() {
+        let result = preprocess("a").unwrap();
+        assert_eq!(result.as_ref(), SD_M_A);
+    }
+
+    #[test]
+    fn preprocess_digit_0() {
+        let result = preprocess("0").unwrap();
+        assert_eq!(result.as_ref(), SD_N_0);
+    }
+
+    #[test]
+    fn preprocess_mixed_content() {
+        let result = preprocess("A+").unwrap();
+        assert!(result.contains(SD_A));
+        assert!(result.contains('+'));
+    }
+
+    #[test]
+    fn preprocess_empty_mapping_is_empty_string() {
+        let result = preprocess("J").unwrap();
+        assert_eq!(result.as_ref(), "");
+    }
+}

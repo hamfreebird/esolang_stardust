@@ -54,6 +54,24 @@ impl ErrorKind {
             ErrorKind::InvalidSpacesForComma { spaces } => {
                 format!("invalid number of spaces ({}) for ',' instruction (must be 0 or 1)", spaces)
             }
+            ErrorKind::InvalidSpacesForEquals { spaces } => {
+                format!("invalid number of spaces ({}) for '=' instruction (must be 0-5)", spaces)
+            }
+            ErrorKind::InvalidSpacesForAmpersand { spaces } => {
+                format!("invalid number of spaces ({}) for '&' instruction (must be 0-3)", spaces)
+            }
+            ErrorKind::InvalidSpacesForHyphen { spaces } => {
+                format!("invalid number of spaces ({}) for '-' instruction (must be 0 or 1)", spaces)
+            }
+            ErrorKind::InvalidSpacesForAngleLeft { spaces } => {
+                format!("invalid number of spaces ({}) for '<' instruction (must be 0-2)", spaces)
+            }
+            ErrorKind::InvalidSpacesForAngleRight { spaces } => {
+                format!("invalid number of spaces ({}) for '>' instruction (must be 0 or 1)", spaces)
+            }
+            ErrorKind::InvalidSpacesForHash { spaces } => {
+                format!("invalid number of spaces ({}) for '#' instruction (must be 0-2)", spaces)
+            }
             ErrorKind::InvalidInstructionContext => "instruction not allowed in this context".to_string(),
             ErrorKind::NotEnoughArguments { func, expected, actual } => {
                 format!(
@@ -61,7 +79,11 @@ impl ErrorKind {
                     func, expected, actual
                 )
             }
-            // ErrorKind::JumpWhenStackAreNotZero => "attempt a jump when the elements in the stack are not zero".to_string(),
+            ErrorKind::IntegerOverflow => "integer overflow".to_string(),
+            ErrorKind::CallDepthExceeded => format!(
+                "maximum call depth ({}) exceeded — possible infinite recursion",
+                crate::stardust::MAX_CALL_DEPTH
+            ),
             ErrorKind::InvalidAnnotation => "invalid annotation, use '//'".to_string(),
             _ => {
                 "unknown error\n\
