@@ -371,8 +371,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %div_zero_{l}, label %div_err_{l}, label %div_ok_{l}"
         ));
         self.emitln(&format!("div_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_divzero()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_divzero()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("div_ok_{l}:"));
         self.emitln(&format!(
             "  {r} = sdiv i64 {a}, {b}",
@@ -403,8 +403,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %mod_zero_{l}, label %mod_err_{l}, label %mod_ok_{l}"
         ));
         self.emitln(&format!("mod_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_modzero()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_modzero()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("mod_ok_{l}:"));
         self.emitln(&format!(
             "  {r} = srem i64 {a}, {b}",
@@ -558,7 +558,7 @@ impl<'a> FuncCompiler<'a> {
             "  call void @runtime_bad_ascii(i64 {v})",
             v = val_str
         ));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("ch_put_{l}:"));
         self.emitln(&format!(
             "  %ch_trunc_{l} = trunc i64 {v} to i32",
@@ -709,8 +709,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %arg_ok_{l}, label %call_args_ok_{l}, label %call_noargs_{l}"
         ));
         self.emitln(&format!("call_noargs_{l}:"));
-        self.emitln(&format!("  call void @runtime_stack_underflow()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("call_args_ok_{l}:"));
 
         // Store frame base
@@ -736,8 +736,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %depth_ok_{l}, label %call_ok_{l}, label %call_depth_err_{l}"
         ));
         self.emitln(&format!("call_depth_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_call_depth()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_call_depth()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("call_ok_{l}:"));
         self.emitln(&format!(
             "  store i32 %fbd_next_{l}, i32* @frame_depth"
@@ -917,7 +917,7 @@ impl<'a> FuncCompiler<'a> {
             "  call void @runtime_heap_oob(i64 {a})",
             a = addr_str
         ));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("st_do_{l}:"));
         self.emitln(&format!(
             "  %st_ptr_{l} = getelementptr [{HS} x i64], [{HS} x i64]* @heap, i32 0, i64 {a}",
@@ -952,7 +952,7 @@ impl<'a> FuncCompiler<'a> {
             "  call void @runtime_heap_oob(i64 {a})",
             a = addr_str
         ));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("ld_do_{l}:"));
         self.emitln(&format!(
             "  %ld_ptr_{l} = getelementptr [{HS} x i64], [{HS} x i64]* @heap, i32 0, i64 {a}",
@@ -1034,8 +1034,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %sl_empty_{l}, label %sl_err_{l}, label %sl_ok_{l}"
         ));
         self.emitln(&format!("sl_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_stack_underflow()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("sl_ok_{l}:"));
         // Read first element
         self.emitln(&format!(
@@ -1184,8 +1184,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %pk_ge0_{l}, label %pk_ok_{l}, label %pk_err_{l}"
         ));
         self.emitln(&format!("pk_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_stack_underflow()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("pk_ok_{l}:"));
         self.emitln(&format!(
             "  %pk_ptr_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %pk_idx_{l}",
@@ -1226,8 +1226,8 @@ impl<'a> FuncCompiler<'a> {
             "  br i1 %dn_ok_{l}, label %dn_do_{l}, label %dn_err_{l}"
         ));
         self.emitln(&format!("dn_err_{l}:"));
-        self.emitln(&format!("  call void @runtime_stack_underflow()"));
-        self.emitln(&format!("  unreachable"));
+        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
+        self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("dn_do_{l}:"));
         self.emitln(&format!(
             "  %sp_dn_new_{l} = sub i64 %sp_dn_{l}, %dn_n_{l}"
@@ -1320,9 +1320,7 @@ impl<'a> FuncCompiler<'a> {
         self.flush();
         let l = self.next_label();
 
-        self.emitln(&format!(
-            "  ; DumpState: print VM state to stderr"
-        ));
+        self.emitln(&"  ; DumpState: print VM state to stderr".to_string());
         self.emitln(&format!(
             "  %dss_sp_{l} = load i64, i64* @sp"
         ));
@@ -1431,10 +1429,10 @@ ret_n:
     out.push_str(INTRINSICS_IR);
 
     // ── 编译 Stardust 函数 ──
-    for (name, body) in &funcs_opt {
+    for (name, func_def) in &funcs_opt {
         // 一阶段：收集 Marks
         let mut marks: HashMap<usize, String> = HashMap::new();
-        for inst in body {
+        for inst in func_def.body.iter() {
             if let Instruction::Mark { name, .. } = inst {
                 marks.insert(*name, FuncCompiler::<'_>::mark_label(*name));
             }
@@ -1447,7 +1445,7 @@ ret_n:
             "define void @sd_func_{name}() {{\nentry:\n",
             name = name
         ));
-        fc.compile_body(body);
+        fc.compile_body(&func_def.body);
         out.push_str(&fc.output);
         out.push_str("  ret void\n}\n\n");
     }

@@ -1,6 +1,7 @@
 /target
 /build
 node_modules/
+.cargo/
 
 # Generated LLVM IR and compiled binaries
 *.ll

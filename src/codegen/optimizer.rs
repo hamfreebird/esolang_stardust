@@ -28,15 +28,22 @@ pub fn optimize(instructions: &[Instruction]) -> Vec<Instruction> {
 /// 优化整个函数表（入口和所有函数体），返回新的函数表。
 pub fn optimize_functions(
     main_instructions: &[Instruction],
-    functions: &std::collections::HashMap<usize, Vec<Instruction>>,
+    functions: &std::collections::HashMap<usize, crate::stardust::FunctionDef>,
 ) -> (
     Vec<Instruction>,
-    std::collections::HashMap<usize, Vec<Instruction>>,
+    std::collections::HashMap<usize, crate::stardust::FunctionDef>,
 ) {
+    use std::rc::Rc;
     let main_opt = optimize(main_instructions);
     let mut funcs_opt = std::collections::HashMap::new();
-    for (name, body) in functions {
-        funcs_opt.insert(*name, optimize(body));
+    for (name, func_def) in functions {
+        funcs_opt.insert(
+            *name,
+            crate::stardust::FunctionDef {
+                body: Rc::new(optimize(&func_def.body)),
+                marks: func_def.marks.clone(),
+            },
+        );
     }
     (main_opt, funcs_opt)
 }
@@ -75,11 +82,9 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
             Instruction::Push(b, _),
             Instruction::Add(_),
         ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-        {
-            if let Some(r) = a.checked_add(*b) {
+            && let Some(r) = a.checked_add(*b) {
                 return Some((vec![Instruction::Push(r, meta.clone())], 3));
             }
-        }
 
         // Push(a) Push(b) Sub  →  Push(a-b)
         if let (
@@ -87,11 +92,9 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
             Instruction::Push(b, _),
             Instruction::Sub(_),
         ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-        {
-            if let Some(r) = a.checked_sub(*b) {
+            && let Some(r) = a.checked_sub(*b) {
                 return Some((vec![Instruction::Push(r, meta.clone())], 3));
             }
-        }
 
         // Push(a) Push(b) Mul  →  Push(a*b)
         if let (
@@ -99,11 +102,9 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
             Instruction::Push(b, _),
             Instruction::Mul(_),
         ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-        {
-            if let Some(r) = a.checked_mul(*b) {
+            && let Some(r) = a.checked_mul(*b) {
                 return Some((vec![Instruction::Push(r, meta.clone())], 3));
             }
-        }
 
         // Push(a) Push(b) Div  →  Push(a/b)  (b != 0)
         if let (
@@ -111,11 +112,9 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
             Instruction::Push(b, _),
             Instruction::Div(_),
         ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-        {
-            if *b != 0 {
+            && *b != 0 {
                 return Some((vec![Instruction::Push(a / b, meta.clone())], 3));
             }
-        }
 
         // Push(a) Push(b) Mod  →  Push(a%b)  (b != 0)
         if let (
@@ -123,11 +122,9 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
             Instruction::Push(b, _),
             Instruction::Mod(_),
         ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-        {
-            if *b != 0 {
+            && *b != 0 {
                 return Some((vec![Instruction::Push(a % b, meta.clone())], 3));
             }
-        }
 
         // Push(a) Push(b) Eq → Push(1 or 0)
         if let (
@@ -220,8 +217,8 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
     // ── 2 指令窗口模式（在 pos+2 检查之外）──────────────────
 
     // Push(a) Not → Push(1 or 0)
-    if pos + 1 < instrs.len() {
-        if let (Instruction::Push(a, _), Instruction::Not(_)) =
+    if pos + 1 < instrs.len()
+        && let (Instruction::Push(a, _), Instruction::Not(_)) =
             (&instrs[pos], &instrs[pos + 1])
         {
             return Some((
@@ -229,7 +226,6 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
                 2,
             ));
         }
-    }
 
     // 模式: Push(0) Jump(name)  →  UncondJump(name)   (Jump 知道栈顶是 0，永不跳转，相当于 NOP)
     // 模式: Push(nonzero) Jump(name)  →  UncondJump(name)   (条件恒真 → 无条件)
@@ -288,8 +284,8 @@ fn peephole(instructions: &[Instruction]) -> Vec<Instruction> {
     while i < instructions.len() {
         let applied = {
             // Push(a) Push(b) Swap → Push(b) Push(a)
-            if i + 2 < instructions.len() {
-                if let (
+            if i + 2 < instructions.len()
+                && let (
                     Instruction::Push(a, _),
                     Instruction::Push(b, _),
                     Instruction::Swap(_),
@@ -300,7 +296,6 @@ fn peephole(instructions: &[Instruction]) -> Vec<Instruction> {
                     i += 3;
                     continue;
                 }
-            }
 
             // Push(0) Add → nothing (加 0 无影响)
             if i + 1 < instructions.len() {
@@ -329,14 +324,13 @@ fn peephole(instructions: &[Instruction]) -> Vec<Instruction> {
             }
 
             // Reverse Reverse → nothing
-            if i + 1 < instructions.len() {
-                if let (Instruction::Reverse(_), Instruction::Reverse(_)) =
+            if i + 1 < instructions.len()
+                && let (Instruction::Reverse(_), Instruction::Reverse(_)) =
                     (&instructions[i], &instructions[i + 1])
                 {
                     i += 2;
                     continue;
                 }
-            }
 
             // ShiftL ShiftR → nothing (循环左移+右移恢复原状)
             if i + 1 < instructions.len() {

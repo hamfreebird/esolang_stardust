@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use crate::stardust::{CallFrame, ErrorKind, InstrMeta, Instruction, ParseResult, StardustError, VM, MAX_CALL_DEPTH};
+use std::rc::Rc;
+use std::time::Instant;
+use crate::stardust::config::VmConfig;
+use crate::stardust::{
+    CallFrame, ErrorKind, InstrMeta, Instruction, ParseResult, StardustError, VM,
+};
 
 /// 弹出帧栈顶，错误携带源码位置
 fn pop_frame(frame: &mut CallFrame, meta: &InstrMeta) -> Result<i64, StardustError> {
@@ -14,24 +19,108 @@ fn framed_err(kind: ErrorKind, meta: &InstrMeta) -> StardustError {
     StardustError::new(kind, Some(meta.span.clone()))
 }
 
+/// I/O 抽象 trait — 允许注入 mock 实现用于测试和 IDE 集成
+pub trait VmIO {
+    fn write_char(&mut self, ch: char) -> io::Result<()>;
+    fn read_char(&mut self) -> io::Result<u8>;
+    fn write_num(&mut self, n: i64) -> io::Result<()>;
+    fn read_num(&mut self) -> io::Result<i64>;
+}
+
+/// 默认 I/O 实现：stdin/stdout
+pub struct StdIO;
+
+impl VmIO for StdIO {
+    fn write_char(&mut self, ch: char) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        write!(stdout, "{}", ch)?;
+        stdout.flush()
+    }
+    fn read_char(&mut self) -> io::Result<u8> {
+        let mut buf = [0u8; 1];
+        io::stdin().read_exact(&mut buf)?;
+        Ok(buf[0])
+    }
+    fn write_num(&mut self, n: i64) -> io::Result<()> {
+        let mut stdout = io::stdout();
+        write!(stdout, "{}", n)?;
+        stdout.flush()
+    }
+    fn read_num(&mut self) -> io::Result<i64> {
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        input.trim()
+            .parse()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+}
+
+/// VM 错误发生时的状态快照
+#[derive(Debug, Clone)]
+pub struct VmSnapshot {
+    pub frames: Vec<FrameSnapshot>,
+    pub heap: HashMap<i64, i64>,
+    pub halted: bool,
+    pub steps_executed: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct FrameSnapshot {
+    pub stack: Vec<i64>,
+    pub pc: usize,
+    pub ret_pc: usize,
+}
+
+impl VmSnapshot {
+    pub fn from_vm(vm: &VM) -> Self {
+        VmSnapshot {
+            frames: vm
+                .all_frames()
+                .iter()
+                .map(|f| FrameSnapshot {
+                    stack: f.stack.clone(),
+                    pc: f.pc,
+                    ret_pc: f.ret_pc,
+                })
+                .collect(),
+            heap: vm.heap_entries().clone(),
+            halted: vm.halted,
+            steps_executed: 0, // 由调用者填入
+        }
+    }
+}
+
 /// 在指定帧中执行单条指令
 ///
 /// 返回 `Ok(Some(...))` 表示遇到 Call 指令，调用者需压入新帧。
 /// 返回 `Ok(None)` 表示指令已被本函数完全处理。
-fn execute_in_frame(
+fn execute_in_frame<I: VmIO>(
     frame: &mut CallFrame,
     heap: &mut HashMap<i64, i64>,
     inst: &Instruction,
+    io: &mut I,
+    config: &VmConfig,
 ) -> Result<Option<(usize, usize, InstrMeta)>, StardustError> {
+    // 栈增长安全检查
+    let check_push = |frame: &CallFrame, meta: &InstrMeta| -> Result<(), StardustError> {
+        if frame.stack.len() >= config.max_stack_size {
+            return Err(framed_err(ErrorKind::StackOverflow, meta));
+        }
+        Ok(())
+    };
+
     match inst {
         // ── 栈操作 ──────────────────────────────────────────
-        Instruction::Push(val, _) => {
+        Instruction::Push(val, meta) => {
+            check_push(frame, meta)?;
             frame.stack.push(*val);
             frame.pc += 1;
         }
         Instruction::Dup(meta) => {
-            let top = *frame.stack.last().ok_or_else(||
-                StardustError::new(ErrorKind::StackUnderflow, Some(meta.span.clone())))?;
+            check_push(frame, meta)?;
+            let top = *frame.stack.last().ok_or_else(|| {
+                StardustError::new(ErrorKind::StackUnderflow, Some(meta.span.clone()))
+            })?;
             frame.stack.push(top);
             frame.pc += 1;
         }
@@ -60,7 +149,8 @@ fn execute_in_frame(
         Instruction::Add(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a.checked_add(b)
+            let r = a
+                .checked_add(b)
                 .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
@@ -68,7 +158,8 @@ fn execute_in_frame(
         Instruction::Sub(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a.checked_sub(b)
+            let r = a
+                .checked_sub(b)
                 .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
@@ -76,7 +167,8 @@ fn execute_in_frame(
         Instruction::Mul(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a.checked_mul(b)
+            let r = a
+                .checked_mul(b)
                 .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
@@ -104,40 +196,49 @@ fn execute_in_frame(
             frame.pc += 1;
         }
 
-        // ── 数字 I/O ────────────────────────────────────────
+        // ── 数字 I/O（通过 VmIO trait）───────────────────────
         Instruction::NumOut(meta) => {
             let val = pop_frame(frame, meta)?;
-            print!("{}", val);
-            io::stdout().flush().map_err(|e|
-                framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+            io.write_num(val)
+                .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
             frame.pc += 1;
         }
         Instruction::NumIn(meta) => {
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).map_err(|e|
-                framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
-            let val: i64 = input.trim().parse().map_err(|_|
-                framed_err(ErrorKind::InvalidIntegerInput, meta))?;
+            check_push(frame, meta)?;
+            let val = io
+                .read_num()
+                .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
             frame.stack.push(val);
             frame.pc += 1;
         }
 
-        // ── 字符 I/O ────────────────────────────────────────
+        // ── 字符 I/O（支持 Unicode）──────────────────────────
         Instruction::CharOut(meta) => {
             let val = pop_frame(frame, meta)?;
-            if val < 0 || val > 127 {
-                return Err(framed_err(ErrorKind::InvalidAscii { value: val }, meta));
+            match config.char_mode {
+                crate::stardust::config::CharMode::Ascii => {
+                    if !(0..=127).contains(&val) {
+                        return Err(framed_err(ErrorKind::InvalidAscii { value: val }, meta));
+                    }
+                    io.write_char(val as u8 as char)
+                        .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+                }
+                crate::stardust::config::CharMode::Unicode => {
+                    let ch = char::from_u32(val as u32).ok_or_else(|| {
+                        framed_err(ErrorKind::InvalidCodePoint { value: val }, meta)
+                    })?;
+                    io.write_char(ch)
+                        .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+                }
             }
-            print!("{}", val as u8 as char);
-            io::stdout().flush().map_err(|e|
-                framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
             frame.pc += 1;
         }
         Instruction::CharIn(meta) => {
-            let mut buf = [0u8; 1];
-            io::stdin().read_exact(&mut buf).map_err(|e|
-                framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
-            frame.stack.push(buf[0] as i64);
+            check_push(frame, meta)?;
+            let byte = io
+                .read_char()
+                .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+            frame.stack.push(byte as i64);
             frame.pc += 1;
         }
 
@@ -146,7 +247,9 @@ fn execute_in_frame(
             frame.pc += 1;
         }
         Instruction::Jump { name, meta } => {
-            let target = *frame.marks.get(name)
+            let target = *frame
+                .marks
+                .get(name)
                 .ok_or_else(|| framed_err(ErrorKind::UndefinedMark { name: *name }, meta))?;
             let cond = pop_frame(frame, meta)?;
             if cond != 0 {
@@ -156,12 +259,14 @@ fn execute_in_frame(
             }
         }
         Instruction::UnconditionalJump { name, meta } => {
-            let target = *frame.marks.get(name)
+            let target = *frame
+                .marks
+                .get(name)
                 .ok_or_else(|| framed_err(ErrorKind::UndefinedMark { name: *name }, meta))?;
             frame.pc = target;
         }
 
-        // ── 比较运算（符号 =）────────────────────────────────
+        // ── 比较运算 ────────────────────────────────────────
         Instruction::Eq(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
@@ -199,7 +304,7 @@ fn execute_in_frame(
             frame.pc += 1;
         }
 
-        // ── 逻辑运算（符号 &）────────────────────────────────
+        // ── 逻辑运算 ────────────────────────────────────────
         Instruction::And(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
@@ -224,35 +329,41 @@ fn execute_in_frame(
             frame.pc += 1;
         }
 
-        // ── 堆操作（符号 -）──────────────────────────────────
+        // ── 堆操作（带上限检查）──────────────────────────────
         Instruction::Store(meta) => {
             let addr = pop_frame(frame, meta)?;
             let val = pop_frame(frame, meta)?;
+            if heap.len() >= config.max_heap_entries && !heap.contains_key(&addr) {
+                return Err(framed_err(ErrorKind::HeapOverflow, meta));
+            }
             heap.insert(addr, val);
             frame.pc += 1;
         }
         Instruction::Load(meta) => {
+            check_push(frame, meta)?;
             let addr = pop_frame(frame, meta)?;
             let val = heap.get(&addr).copied().unwrap_or(0);
             frame.stack.push(val);
             frame.pc += 1;
         }
 
-        // ── 栈扩展（符号 < >）───────────────────────────────
+        // ── 栈扩展 ──────────────────────────────────────────
         Instruction::ShiftL(meta) => {
             if !frame.stack.is_empty() {
-                let first = frame.stack.remove(0); // 栈底
-                frame.stack.push(first);            // → 栈顶
+                let first = frame.stack.remove(0);
+                frame.stack.push(first);
             } else {
                 return Err(framed_err(ErrorKind::StackUnderflow, meta));
             }
             frame.pc += 1;
         }
-        Instruction::Depth(_meta) => {
+        Instruction::Depth(meta) => {
+            check_push(frame, meta)?;
             frame.stack.push(frame.stack.len() as i64);
             frame.pc += 1;
         }
         Instruction::Pick(meta) => {
+            check_push(frame, meta)?;
             let n = pop_frame(frame, meta)?;
             let n = n.max(0) as usize;
             if n >= frame.stack.len() {
@@ -265,7 +376,7 @@ fn execute_in_frame(
         }
         Instruction::ShiftR(meta) => {
             if let Some(last) = frame.stack.pop() {
-                frame.stack.insert(0, last); // 栈顶 → 栈底
+                frame.stack.insert(0, last);
             } else {
                 return Err(framed_err(ErrorKind::StackUnderflow, meta));
             }
@@ -282,7 +393,7 @@ fn execute_in_frame(
             frame.pc += 1;
         }
 
-        // ── 调试（符号 #）────────────────────────────────────
+        // ── 调试 ────────────────────────────────────────────
         Instruction::DumpStack(_meta) => {
             eprintln!("[DEBUG] Stack: {:?}", frame.stack);
             frame.pc += 1;
@@ -297,13 +408,16 @@ fn execute_in_frame(
             frame.pc += 1;
         }
         Instruction::Breakpoint(_meta) => {
-            // 当前实现为 NOP；后续 --debug 模式会在此暂停并等待用户输入
             frame.pc += 1;
         }
 
-        // ── 函数调用（支持嵌套/递归）─────────────────────────
-        Instruction::Call { name, argc, meta } => {
-            frame.pc += 1; // 调用方 PC 前进到 Call 的下一条（作为 ret_pc）
+        // ── 函数调用 ────────────────────────────────────────
+        Instruction::Call {
+            name,
+            argc,
+            meta,
+        } => {
+            frame.pc += 1;
             return Ok(Some((*name, *argc, meta.clone())));
         }
     }
@@ -315,9 +429,9 @@ fn execute_in_frame(
 // ============================================================================
 
 impl VM {
-    pub fn new(parse_result: ParseResult) -> Self {
+    pub fn new(parse_result: ParseResult, config: VmConfig) -> Self {
         let main_frame = CallFrame::new(
-            parse_result.main_instructions,
+            Rc::new(parse_result.main_instructions),
             parse_result.main_marks,
         );
         VM {
@@ -326,12 +440,47 @@ impl VM {
             heap: HashMap::new(),
             halted: false,
             debug: None,
+            config,
         }
     }
 
-    /// 运行主程序直到结束或出错
+    /// 运行主程序直到结束或出错（使用默认 StdIO）
     pub fn run(&mut self) -> Result<(), StardustError> {
+        let mut io = StdIO;
+        self.run_with_io(&mut io)
+    }
+
+    /// 运行主程序，使用注入的 I/O 实现
+    pub fn run_with_io<I: VmIO>(&mut self, io: &mut I) -> Result<(), StardustError> {
+        let start_time = Instant::now();
+        let mut steps: u64 = 0;
+
         while !self.halted {
+            // ── 步数限制检查 ─────────────────────────────
+            if let Some(limit) = self.config.max_steps {
+                if steps >= limit {
+                    let mut snap = VmSnapshot::from_vm(self);
+                    snap.steps_executed = steps;
+                    return Err(StardustError::new(
+                        ErrorKind::StepLimitExceeded { steps: limit },
+                        None,
+                    ));
+                }
+            }
+            steps += 1;
+
+            // ── 时间限制检查（每 1000 步检查一次）───────
+            if steps % 1000 == 0 {
+                if let Some(limit_secs) = self.config.time_limit_secs {
+                    if start_time.elapsed().as_secs() >= limit_secs {
+                        return Err(StardustError::new(
+                            ErrorKind::TimeLimitExceeded,
+                            None,
+                        ));
+                    }
+                }
+            }
+
             let frame_done = {
                 let frame = self.frames.last().unwrap();
                 frame.pc >= frame.instructions.len()
@@ -348,23 +497,16 @@ impl VM {
                 continue;
             }
 
-            // 读取下一条指令
-            let inst = {
-                let frame = self.frames.last().unwrap();
-                frame.instructions[frame.pc].clone()
-            };
-
-            // ── 调试钩子 ────────────────────────────────
+            // ── 读取下一条指令（使用引用，消除 clone）─────
             let should_break = match &self.debug {
                 Some(dbg) => {
                     let frame = self.frames.last().unwrap();
-                    dbg.should_break(frame.pc, &frame.marks, &inst)
+                    dbg.should_break(frame.pc, &frame.marks, &frame.instructions[frame.pc])
                 }
                 None => false,
             };
 
             if should_break {
-                // 临时取出 debugger，解除借用冲突
                 let mut debug = self.debug.take();
                 if let Some(ref mut dbg) = debug {
                     match dbg.interact(self) {
@@ -381,12 +523,15 @@ impl VM {
                 }
                 self.debug = debug;
             }
-            // ── 调试钩子结束 ──────────────────────────
 
-            // 执行指令
+            // ── 执行指令（Rc 共享，零 clone）──────────────
             let call_info = {
                 let frame = self.frames.last_mut().unwrap();
-                execute_in_frame(frame, &mut self.heap, &inst)?
+                // 克隆 Rc（仅引用计数增减），解除对 frame 的借用
+                let inst_rc = Rc::clone(&frame.instructions);
+                let pc = frame.pc;
+                let inst_ref = &inst_rc[pc];
+                execute_in_frame(frame, &mut self.heap, inst_ref, io, &self.config)?
             };
 
             if let Some((name, argc, meta)) = call_info {
@@ -396,42 +541,36 @@ impl VM {
         Ok(())
     }
 
-    /// 压入新的函数调用帧
+    /// 压入新的函数调用帧（Rc 共享函数体，预计算的 marks）
     fn handle_call(
         &mut self,
         func_name: usize,
         argc: usize,
         call_meta: &InstrMeta,
     ) -> Result<(), StardustError> {
-        if self.frames.len() >= MAX_CALL_DEPTH {
+        if self.frames.len() >= self.config.max_call_depth {
             return Err(StardustError::new(
                 ErrorKind::CallDepthExceeded,
                 Some(call_meta.span.clone()),
             ));
         }
 
-        // 查找函数体
-        let body = self.functions.get(&func_name)
-            .ok_or_else(|| StardustError::new(
-                ErrorKind::UndefinedFunction { name: func_name },
-                Some(call_meta.span.clone()),
-            ))?
-            .clone();
+        // 查找函数定义（含预计算的 marks）
+        let func_def = self
+            .functions
+            .get(&func_name)
+            .ok_or_else(|| {
+                StardustError::new(
+                    ErrorKind::UndefinedFunction { name: func_name },
+                    Some(call_meta.span.clone()),
+                )
+            })?;
 
-        // 构建函数体内 marks 表（同时检查重复）
-        let mut local_marks: HashMap<usize, usize> = HashMap::new();
-        for (idx, inst) in body.iter().enumerate() {
-            if let Instruction::Mark { name, meta } = inst {
-                if local_marks.insert(*name, idx).is_some() {
-                    return Err(StardustError::new(
-                        ErrorKind::DuplicateMark { name: *name },
-                        Some(meta.span.clone()),
-                    ));
-                }
-            }
-        }
+        // Rc::clone 仅增加引用计数，不复制指令数据
+        let body = Rc::clone(&func_def.body);
+        let marks = func_def.marks.clone();
 
-        // 从当前帧弹出参数（在独立作用域中）
+        // 从当前帧弹出参数
         let (args, ret_pc) = {
             let frame = self.frames.last().unwrap();
 
@@ -446,17 +585,16 @@ impl VM {
                 ));
             }
 
-            let mut popped = Vec::with_capacity(argc);
-            // 不能用 &mut self while iterating, 收集索引后弹出
             let stack = &frame.stack;
             let start = stack.len() - argc;
+            let mut popped = Vec::with_capacity(argc);
             for i in start..stack.len() {
                 popped.push(stack[i]);
             }
             (popped, frame.pc)
         };
 
-        // 从当前帧中真正弹出（此时借用已释放）
+        // 真正弹出
         {
             let frame = self.frames.last_mut().unwrap();
             for _ in 0..argc {
@@ -465,7 +603,7 @@ impl VM {
         }
 
         // 压入新帧
-        let mut new_frame = CallFrame::new(body, local_marks);
+        let mut new_frame = CallFrame::new(body, marks);
         new_frame.stack = args;
         new_frame.ret_pc = ret_pc;
         self.frames.push(new_frame);

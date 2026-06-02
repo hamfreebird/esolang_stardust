@@ -5,11 +5,9 @@ use esolang_stardust::stardust::debugger::Debugger;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
 use esolang_stardust::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
+use esolang_stardust::stardust::config::parse_config;
 use esolang_stardust::stardust::{StardustError, VM};
 use std::{env, fs, process};
-
-// TODO:转译为Rust/C代码，实现编译为可执行文件  ← LLVM 编译已实现！
-// TODO:增加调试处理，单点执行  ← 调试器已实现！使用 --debug 或 -d
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -304,7 +302,16 @@ fn cmd_run(args: &[String], debug_mode: bool) {
         }
     };
 
-    let unwind_source = match simple_preprocess(&source) {
+    // 提取 #[key=value] 运行时配置注解
+    let (config, clean_source) = match parse_config(&source) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Config error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let unwind_source = match simple_preprocess(&clean_source) {
         Ok(uw) => uw,
         Err(e) => {
             print_error(&e, &source, "");
@@ -328,7 +335,7 @@ fn cmd_run(args: &[String], debug_mode: bool) {
         }
     };
 
-    let mut vm = VM::new(parsed);
+    let mut vm = VM::new(parsed, config);
 
     // 激活调试器
     if debug_mode {

@@ -1,7 +1,9 @@
 use crate::stardust::debugger::Debugger;
 use std::collections::HashMap;
+use std::rc::Rc;
 use serde::Serialize;
 
+pub mod config;
 pub mod debugger;
 pub mod lexer;
 pub mod parser;
@@ -90,17 +92,70 @@ pub enum Instruction {
     Breakpoint(InstrMeta),                  // 2 #  调试断点（仅--debug模式生效）
 }
 
-#[derive(Debug, Serialize)]
+impl Instruction {
+    /// 返回指令的人类可读描述
+    pub fn format(&self) -> String {
+        match self {
+            Instruction::Push(n, _) => format!("Push({})", n),
+            Instruction::Dup(_) => "Dup".into(),
+            Instruction::Swap(_) => "Swap".into(),
+            Instruction::Rotate(_) => "Rotate".into(),
+            Instruction::Pop(_) => "Pop".into(),
+            Instruction::Add(_) => "Add".into(),
+            Instruction::Sub(_) => "Sub".into(),
+            Instruction::Mul(_) => "Mul".into(),
+            Instruction::Div(_) => "Div".into(),
+            Instruction::Mod(_) => "Mod".into(),
+            Instruction::Reverse(_) => "Reverse".into(),
+            Instruction::NumOut(_) => "NumOut".into(),
+            Instruction::NumIn(_) => "NumIn".into(),
+            Instruction::CharOut(_) => "CharOut".into(),
+            Instruction::CharIn(_) => "CharIn".into(),
+            Instruction::Mark { name, .. } => format!("Mark({})", name),
+            Instruction::Jump { name, .. } => format!("Jump({})", name),
+            Instruction::UnconditionalJump { name, .. } => format!("UncondJump({})", name),
+            Instruction::Call { name, argc, .. } => format!("Call(func={}, argc={})", name, argc),
+            Instruction::Eq(_) => "Eq".into(),
+            Instruction::Ne(_) => "Ne".into(),
+            Instruction::Lt(_) => "Lt".into(),
+            Instruction::Gt(_) => "Gt".into(),
+            Instruction::Le(_) => "Le".into(),
+            Instruction::Ge(_) => "Ge".into(),
+            Instruction::And(_) => "And".into(),
+            Instruction::Or(_) => "Or".into(),
+            Instruction::Not(_) => "Not".into(),
+            Instruction::Xor(_) => "Xor".into(),
+            Instruction::Store(_) => "Store".into(),
+            Instruction::Load(_) => "Load".into(),
+            Instruction::ShiftL(_) => "ShiftL".into(),
+            Instruction::Depth(_) => "Depth".into(),
+            Instruction::Pick(_) => "Pick".into(),
+            Instruction::ShiftR(_) => "ShiftR".into(),
+            Instruction::DropN(_) => "DropN".into(),
+            Instruction::DumpStack(_) => "DumpStack".into(),
+            Instruction::DumpState(_) => "DumpState".into(),
+            Instruction::Breakpoint(_) => "Breakpoint".into(),
+        }
+    }
+}
+
+/// 函数定义：函数体 + 预计算的 Marks 表
+#[derive(Debug, Clone)]
+pub struct FunctionDef {
+    pub body: Rc<Vec<Instruction>>,
+    pub marks: HashMap<usize, usize>,
+}
+
+#[derive(Debug)]
 pub struct ParseResult {
     pub main_instructions: Vec<Instruction>,
     pub main_marks: HashMap<usize, usize>,
-    pub functions: HashMap<usize, Vec<Instruction>>,
+    pub functions: HashMap<usize, FunctionDef>,
 }
 
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
-    // 解析过程暂存
     instructions: Vec<Instruction>,
     marks: HashMap<usize, usize>,
     functions: HashMap<usize, Vec<Instruction>>,
@@ -109,9 +164,10 @@ struct Parser {
 /// 调用栈帧 — 每次函数调用创建一个新帧
 ///
 /// 主程序作为第 0 帧，函数调用时压入新帧，返回时弹出并合并栈内容。
+/// 使用 `Rc` 共享函数体避免每次调用 clone。
 #[derive(Debug, Clone)]
 pub struct CallFrame {
-    pub instructions: Vec<Instruction>,
+    pub instructions: Rc<Vec<Instruction>>,
     pub stack: Vec<i64>,
     pub pc: usize,
     pub marks: HashMap<usize, usize>,
@@ -120,7 +176,7 @@ pub struct CallFrame {
 }
 
 impl CallFrame {
-    pub fn new(instructions: Vec<Instruction>, marks: HashMap<usize, usize>) -> Self {
+    pub fn new(instructions: Rc<Vec<Instruction>>, marks: HashMap<usize, usize>) -> Self {
         CallFrame {
             instructions,
             stack: Vec::new(),
@@ -132,8 +188,8 @@ impl CallFrame {
 }
 
 pub struct VM {
-    /// 函数库（所有帧共享）
-    functions: HashMap<usize, Vec<Instruction>>,
+    /// 函数库（Rc 共享函数体，避免每次调用 clone）
+    pub functions: HashMap<usize, FunctionDef>,
     /// 调用栈：frames[0] 为主程序，后续为函数调用帧
     frames: Vec<CallFrame>,
     /// 堆存储（所有帧共享）：地址 → 值
@@ -142,6 +198,8 @@ pub struct VM {
     halted: bool,
     /// 调试器（None 表示非调试模式）
     pub debug: Option<Debugger>,
+    /// 运行时配置
+    pub config: crate::stardust::config::VmConfig,
 }
 
 impl VM {
@@ -177,13 +235,13 @@ impl VM {
 
     /// 当前帧的栈（栈顶在后）
     pub fn current_stack(&self) -> &[i64] {
-        &self.frames.last().map(|f| &f.stack[..]).unwrap_or(&[])
+        self.frames.last().map(|f| &f.stack[..]).unwrap_or(&[])
     }
 
     /// 设置主帧栈（REPL 状态注入）
     pub fn set_main_stack(&mut self, stack: Vec<i64>) {
         if self.frames.is_empty() {
-            self.frames.push(CallFrame::new(vec![], HashMap::new()));
+            self.frames.push(CallFrame::new(Rc::new(Vec::new()), HashMap::new()));
         }
         self.frames[0].stack = stack;
     }
@@ -246,7 +304,6 @@ pub enum ErrorKind {
     DuplicateFunction { name: usize },
     UndefinedMark { name: usize },
     UndefinedFunction { name: usize },
-    CallInsideFunction,
     UnclosedFunction { name: usize },
     StackUnderflow,
     DivisionByZero,
@@ -256,7 +313,6 @@ pub enum ErrorKind {
     IoError { reason: String },
     UnexpectedEof,
     IncompleteFunctionCall,
-    ExpectedColonInCall,
     ExpectedSemicolonAfterCall,
     InvalidSpacesForPlus,
     InvalidSpacesForStar { spaces: usize },
@@ -276,6 +332,11 @@ pub enum ErrorKind {
     ParseChar,
     StdIoError,
     CodePointTooLarge,
+    StackOverflow,
+    HeapOverflow,
+    InvalidCodePoint { value: i64 },
+    StepLimitExceeded { steps: u64 },
+    TimeLimitExceeded,
 }
 
 /// 完整的错误信息

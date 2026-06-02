@@ -251,7 +251,7 @@ fn handle_meta(
                 let mut names: Vec<_> = ctx.functions.keys().collect();
                 names.sort();
                 for n in names {
-                    eprintln!("  func {}: {} instructions", n, ctx.functions[n].len());
+                    eprintln!("  func {}: {} instructions", n, ctx.functions[n].body.len());
                 }
             }
             MetaAction::Ok
@@ -393,4 +393,33 @@ fn show_stack_status(ctx: &ReplContext) {
         status.push_str(&format!(" ... ({} more)", depth - display_count));
     }
     eprintln!("{}", status);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── detect_mode ─────────────────────────────────────────────
+
+    #[test]
+    fn detect_mode_shorthand_for_letters() {
+        assert!(matches!(detect_mode("Push(65)"), InputMode::Shorthand));
+        assert!(matches!(detect_mode("Add"), InputMode::Shorthand));
+        assert!(matches!(detect_mode(r#""Hello""#), InputMode::Shorthand));
+        assert!(matches!(detect_mode("Dup"), InputMode::Shorthand));
+    }
+
+    #[test]
+    fn detect_mode_raw_for_symbols() {
+        assert!(matches!(detect_mode("     +   ,"), InputMode::Raw));
+        assert!(matches!(detect_mode("+*"), InputMode::Raw));
+        assert!(matches!(detect_mode(" +"), InputMode::Raw));
+    }
+
+    #[test]
+    fn detect_mode_empty_defaults_to_shorthand() {
+        // Empty input returns Shorthand (will be parsed as empty instruction list)
+        assert!(matches!(detect_mode(""), InputMode::Shorthand));
+        assert!(matches!(detect_mode("   "), InputMode::Shorthand));
+    }
 }

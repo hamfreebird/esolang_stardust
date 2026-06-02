@@ -4,6 +4,7 @@
 
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
+use esolang_stardust::stardust::config::VmConfig;
 use esolang_stardust::stardust::{ErrorKind, StardustError, VM};
 
 // ── 辅助函数：生成精确空格数 ──────────────────────────────────────
@@ -76,7 +77,7 @@ fn dump_stack() -> String { "#".to_string() }
 fn run(source: &str) -> Result<(), StardustError> {
     let tokens = tokenize(source)?;
     let parsed = parse_program(tokens)?;
-    let mut vm = VM::new(parsed);
+    let mut vm = VM::new(parsed, VmConfig::default());
     vm.run()
 }
 

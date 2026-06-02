@@ -55,19 +55,39 @@
             "comment": "CharOut/CharIn I/O指令 (,符号)"
         },
         {
-            "name": "keyword.other.hash.sd",
-            "match": "#",
-            "comment": "Hash 符号（保留备用）"
+            "name": "keyword.operator.assignment.sd",
+            "match": "-",
+            "comment": "堆操作: Store/Load"
         },
         {
-            "name": "keyword.other.operator.sd",
-            "match": "[\\-=&<>]",
-            "comment": "比较/赋值符号（保留备用）"
+            "name": "keyword.operator.comparison.sd",
+            "match": "=",
+            "comment": "比较运算: Eq/Ne/Lt/Gt/Le/Ge"
+        },
+        {
+            "name": "keyword.operator.shift.sd",
+            "match": "<",
+            "comment": "栈左操作: ShiftL/Depth/Pick"
+        },
+        {
+            "name": "keyword.operator.shift.sd",
+            "match": ">",
+            "comment": "栈右操作: ShiftR/DropN"
+        },
+        {
+            "name": "keyword.operator.logical.sd",
+            "match": "&",
+            "comment": "逻辑运算: And/Or/Not/Xor"
+        },
+        {
+            "name": "support.function.debug.sd",
+            "match": "#",
+            "comment": "调试: DumpStack/DumpState/Breakpoint"
         },
         {
             "name": "invalid.illegal.sd",
-            "match": "[^\\+\\*`':;\\.\\,~#\\-=&<>/ \\t\\n\\r]",
-            "comment": "非法字符（字母、数字等非符号字符）"
+            "match": "[^\\+\\*`':;\\.\\,~#\\-=<>/& \\t\\n\\r\\[\\]]",
+            "comment": "非法字符（字母、数字等非符号字符）。注意：允许 [ ] 用于源码注解"
         }
     ]
 }

@@ -107,7 +107,7 @@ fn natural_source_code(
 
     let mut in_anno: bool = false;
     for (index, char) in chars_vec.iter_mut().enumerate() {
-        if in_anno == true {
+        if in_anno {
             continue
         };
         let _char = char.chars().next().unwrap();
@@ -154,7 +154,7 @@ pub fn bump_source(
      output_file: Option<&str>
 ) -> Result<(), StardustError> {
 
-    let bump_film = format_results(&*bump_run_source(input_file));
+    let bump_film = format_results(&bump_run_source(input_file));
 
     // 确定输出文件路径
     let out_path = match output_file{
@@ -260,47 +260,7 @@ fn format_long_line(line: &str) -> String {
 
 /// 格式化单条指令
 fn format_instruction(instr: &Instruction) -> String {
-    match instr {
-        Instruction::Push(n, _) => format!("Push({})", n),
-        Instruction::Dup(_) => "Dup".to_string(),
-        Instruction::Swap(_) => "Swap".to_string(),
-        Instruction::Rotate(_) => "Rotate".to_string(),
-        Instruction::Pop(_) => "Pop".to_string(),
-        Instruction::Add(_) => "Add".to_string(),
-        Instruction::Sub(_) => "Sub".to_string(),
-        Instruction::Mul(_) => "Mul".to_string(),
-        Instruction::Div(_) => "Div".to_string(),
-        Instruction::Mod(_) => "Mod".to_string(),
-        Instruction::Reverse(_) => "Reverse".to_string(),
-        Instruction::NumOut(_) => "NumOut".to_string(),
-        Instruction::NumIn(_) => "NumIn".to_string(),
-        Instruction::CharOut(_) => "CharOut".to_string(),
-        Instruction::CharIn(_) => "CharIn".to_string(),
-        Instruction::Mark { name, .. } => format!("Mark({})", name),
-        Instruction::Jump { name, .. } => format!("Jump({})", name),
-        Instruction::Call { name, argc, .. } => format!("Call(name={}, argc={})", name, argc),
-        Instruction::UnconditionalJump { name, .. } => format!("UncondJump({})", name),
-        Instruction::Eq(_) => "Eq".to_string(),
-        Instruction::Ne(_) => "Ne".to_string(),
-        Instruction::Lt(_) => "Lt".to_string(),
-        Instruction::Gt(_) => "Gt".to_string(),
-        Instruction::Le(_) => "Le".to_string(),
-        Instruction::Ge(_) => "Ge".to_string(),
-        Instruction::And(_) => "And".to_string(),
-        Instruction::Or(_) => "Or".to_string(),
-        Instruction::Not(_) => "Not".to_string(),
-        Instruction::Xor(_) => "Xor".to_string(),
-        Instruction::Store(_) => "Store".to_string(),
-        Instruction::Load(_) => "Load".to_string(),
-        Instruction::ShiftL(_) => "ShiftL".to_string(),
-        Instruction::Depth(_) => "Depth".to_string(),
-        Instruction::Pick(_) => "Pick".to_string(),
-        Instruction::ShiftR(_) => "ShiftR".to_string(),
-        Instruction::DropN(_) => "DropN".to_string(),
-        Instruction::DumpStack(_) => "DumpStack".to_string(),
-        Instruction::DumpState(_) => "DumpState".to_string(),
-        Instruction::Breakpoint(_) => "Breakpoint".to_string(),
-    }
+    instr.format()
 }
 
 /// 主格式化函数
@@ -391,9 +351,9 @@ pub fn format_results(results: &[StageResult]) -> String {
 
                 if !parsed.functions.is_empty() {
                     writeln!(output, "Functions:").unwrap();
-                    for (func_name, body) in parsed.functions.iter() {
-                        writeln!(output, "  function {} ({} instructions):", func_name, body.len()).unwrap();
-                        for (idx, instr) in body.iter().enumerate() {
+                    for (func_name, func_def) in parsed.functions.iter() {
+                        writeln!(output, "  function {} ({} instructions):", func_name, func_def.body.len()).unwrap();
+                        for (idx, instr) in func_def.body.iter().enumerate() {
                             writeln!(output, "    {:3}: {}", idx, format_instruction(instr)).unwrap();
                         }
                     }
@@ -430,14 +390,13 @@ pub fn print_error(error: &StardustError, source: &str, filename: &str) {
     if let Some(span) = &error.span {
         eprintln!("  --> {}:{}:{}", filename, span.line, span.column);
         // 打印源代码行（防御性：line/column 为 0 时不尝试打印）
-        if span.line > 0 {
-            if let Some(line) = source.lines().nth(span.line.saturating_sub(1)) {
+        if span.line > 0
+            && let Some(line) = source.lines().nth(span.line.saturating_sub(1)) {
                 eprintln!("   |");
                 eprintln!("{:3} | {}", span.line, line);
                 let col = span.column.saturating_sub(1);
-                eprintln!("   | {}{}", " ".repeat(col), "^");
+                eprintln!("   | {}^", " ".repeat(col));
             }
-        }
     }
     if let ErrorKind::IoError { reason } = &error.kind {
         eprintln!("  I/O details: {}", reason);

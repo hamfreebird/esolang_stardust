@@ -1,11 +1,24 @@
 [package]
 name = "esolang_stardust"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
+rust-version = "1.95"
+description = "Stardust esolang interpreter and LLVM compiler"
+license = "MIT"
+repository = "https://github.com/hamfreebird/esolang_stardust"
+readme = "readme.md"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# [build-dependencies]
-# winresource = "0.1"
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"

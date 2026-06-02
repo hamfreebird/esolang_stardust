@@ -61,14 +61,6 @@ pub const SD_N_8: &str = "";
 pub const SD_N_9: &str = "";
 pub const SD_N_0: &str = "";  // 30
 
-/// 预定义的Hello world!
-pub const HELLO_WORLD: &str = "
-            +               +  *       +* +,
-         +            +  *      +** +,            +* +, +,
-        +* +,         +             +  * +,        +  *
-              + * +,    + +,        +* +,           + * +,
-             + *,        +               +  *        +*,";
-
 pub fn spaces(n: u8) -> String {
     " ".repeat(n as usize)
 }

@@ -32,7 +32,6 @@ impl ErrorKind {
             ErrorKind::DuplicateFunction { name } => format!("duplicate function '{}'", name),
             ErrorKind::UndefinedMark { name } => format!("undefined mark '{}'", name),
             ErrorKind::UndefinedFunction { name } => format!("undefined function '{}'", name),
-            ErrorKind::CallInsideFunction => "function call not allowed inside function body".to_string(),
             ErrorKind::UnclosedFunction { name } => format!("unclosed function '{}'", name),
             ErrorKind::StackUnderflow => "stack underflow".to_string(),
             ErrorKind::DivisionByZero => "division by zero".to_string(),
@@ -42,7 +41,6 @@ impl ErrorKind {
             ErrorKind::IoError { reason } => format!("I/O error: {}", reason),
             ErrorKind::UnexpectedEof => "unexpected end of file".to_string(),
             ErrorKind::IncompleteFunctionCall => "incomplete function call".to_string(),
-            ErrorKind::ExpectedColonInCall => "expected ':' after function name in call".to_string(),
             ErrorKind::ExpectedSemicolonAfterCall => "expected ';' at end of function call".to_string(),
             ErrorKind::InvalidSpacesForPlus => "invalid number of spaces for '+' instruction (must be >= 1)".to_string(),
             ErrorKind::InvalidSpacesForStar { spaces } => {
@@ -80,11 +78,22 @@ impl ErrorKind {
                 )
             }
             ErrorKind::IntegerOverflow => "integer overflow".to_string(),
-            ErrorKind::CallDepthExceeded => format!(
-                "maximum call depth ({}) exceeded — possible infinite recursion",
-                crate::stardust::MAX_CALL_DEPTH
-            ),
+            ErrorKind::CallDepthExceeded => "maximum call depth exceeded — possible infinite recursion"
+                .to_string(),
             ErrorKind::InvalidAnnotation => "invalid annotation, use '//'".to_string(),
+            ErrorKind::StackOverflow => format!(
+                "stack overflow — maximum stack size exceeded"
+            ),
+            ErrorKind::HeapOverflow => "heap overflow — maximum heap entries exceeded".to_string(),
+            ErrorKind::InvalidCodePoint { value } => format!(
+                "invalid Unicode code point: {}",
+                value
+            ),
+            ErrorKind::StepLimitExceeded { steps } => format!(
+                "step limit exceeded ({})",
+                steps
+            ),
+            ErrorKind::TimeLimitExceeded => "time limit exceeded".to_string(),
             _ => {
                 "unknown error\n\
                 这条消息面向开发者，对，说的就是你，freebird，你是不是忘了把错误类型加到default_message里了？？\n\

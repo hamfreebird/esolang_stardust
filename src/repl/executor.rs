@@ -3,8 +3,9 @@
 //! 维护跨 REPL 行的持久 VM 状态（栈、堆、函数表）。
 //! 每次用户输入创建微型 VM，注入持久状态，执行后归还。
 
-use crate::stardust::{Instruction, ParseResult, VM};
+use crate::stardust::{FunctionDef, Instruction, ParseResult, VM};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// REPL 持久状态
 pub struct ReplContext {
@@ -13,7 +14,13 @@ pub struct ReplContext {
     /// 跨行持久堆
     pub heap: HashMap<i64, i64>,
     /// 用户通过 :func 定义的函数
-    pub functions: HashMap<usize, Vec<Instruction>>,
+    pub functions: HashMap<usize, FunctionDef>,
+}
+
+impl Default for ReplContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ReplContext {
@@ -31,7 +38,16 @@ impl ReplContext {
     }
 
     pub fn define_function(&mut self, name: usize, body: Vec<Instruction>) {
-        self.functions.insert(name, body);
+        let mut marks = HashMap::new();
+        for (idx, inst) in body.iter().enumerate() {
+            if let Instruction::Mark { name: n, .. } = inst {
+                marks.insert(*n, idx);
+            }
+        }
+        self.functions.insert(name, FunctionDef {
+            body: Rc::new(body),
+            marks,
+        });
     }
 
     pub fn stack_depth(&self) -> usize {
@@ -72,7 +88,7 @@ pub fn execute_repl(
         functions: ctx.functions.clone(),
     };
 
-    let mut vm = VM::new(parse_result);
+    let mut vm = VM::new(parse_result, crate::stardust::config::VmConfig::default());
 
     // 注入持久状态
     vm.set_main_stack(ctx.stack.clone());

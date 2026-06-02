@@ -3,7 +3,6 @@
 //! 格式化栈、堆、VM 状态以便向用户展示。
 
 use crate::stardust::CallFrame;
-use crate::stardust::debugger::format_inst;
 use std::collections::HashMap;
 
 /// 格式化栈内容
@@ -80,7 +79,7 @@ pub fn format_nearby(frame: &CallFrame, radius: usize) -> String {
             "  {} {:4}: {}{}",
             mark,
             i,
-            format_inst(&frame.instructions[i]),
+            frame.instructions[i].format(),
             suffix
         ));
     }
@@ -102,6 +101,158 @@ pub fn format_frames(frames: &[CallFrame]) -> String {
         ));
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stardust::{InstrMeta, Instruction};
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    fn meta() -> InstrMeta {
+        InstrMeta::default()
+    }
+
+    // ── format_stack ─────────────────────────────────────────────
+
+    #[test]
+    fn format_stack_empty() {
+        assert_eq!(format_stack(&[], 10), "  Stack: (empty)");
+    }
+
+    #[test]
+    fn format_stack_nonempty() {
+        let stack = vec![1, 2, 3];
+        let result = format_stack(&stack, 10);
+        assert!(result.contains("3, 2, 1")); // reversed order
+    }
+
+    #[test]
+    fn format_stack_truncation() {
+        let stack: Vec<i64> = (0..20).collect();
+        let result = format_stack(&stack, 5);
+        assert!(result.contains("... (15 more)"));
+    }
+
+    // ── format_heap ──────────────────────────────────────────────
+
+    #[test]
+    fn format_heap_empty() {
+        assert_eq!(format_heap(&HashMap::new(), 10), "  Heap: (empty)");
+    }
+
+    #[test]
+    fn format_heap_sorted_by_key() {
+        let mut heap = HashMap::new();
+        heap.insert(10, 100);
+        heap.insert(5, 200);
+        let result = format_heap(&heap, 10);
+        let pos5 = result.find("[5]").unwrap();
+        let pos10 = result.find("[10]").unwrap();
+        assert!(pos5 < pos10); // keys are sorted
+    }
+
+    #[test]
+    fn format_heap_truncation() {
+        let mut heap = HashMap::new();
+        for i in 0..10 {
+            heap.insert(i, i * 10);
+        }
+        let result = format_heap(&heap, 3);
+        assert!(result.contains("... (7 more)"));
+    }
+
+    // ── format_vm_info ───────────────────────────────────────────
+
+    #[test]
+    fn format_vm_info_basic() {
+        let result = format_vm_info(42, 5, 3, 1, 2);
+        assert!(result.contains("PC: 42"));
+        assert!(result.contains("Stack: 5"));
+        assert!(result.contains("Heap: 3"));
+        assert!(result.contains("Frames: 1"));
+        assert!(result.contains("Functions: 2"));
+    }
+
+    // ── format_nearby ────────────────────────────────────────────
+
+    #[test]
+    fn format_nearby_shows_current_pc_marker() {
+        let frame = CallFrame::new(
+            Rc::new(vec![
+                Instruction::Push(1, meta()),
+                Instruction::Add(meta()),
+            ]),
+            HashMap::new(),
+        );
+        let result = format_nearby(&frame, 3);
+        assert!(result.contains("→")); // PC marker
+    }
+
+    #[test]
+    fn format_nearby_shows_marks() {
+        let mut marks = HashMap::new();
+        marks.insert(7, 1usize);
+        let mut frame = CallFrame::new(
+            Rc::new(vec![
+                Instruction::Push(1, meta()),
+                Instruction::Mark { name: 7, meta: meta() },
+            ]),
+            marks,
+        );
+        frame.pc = 1;
+        let result = format_nearby(&frame, 3);
+        assert!(result.contains("Mark(7)"));
+    }
+
+    // ── format_frames ────────────────────────────────────────────
+
+    #[test]
+    fn format_frames_single() {
+        let frame = CallFrame::new(
+            Rc::new(vec![Instruction::Push(1, meta())]),
+            HashMap::new(),
+        );
+        let result = format_frames(&[frame]);
+        assert!(result.contains("1 frames"));
+        assert!(result.contains("#0 main"));
+    }
+
+    #[test]
+    fn format_frames_multiple() {
+        let f1 = CallFrame::new(
+            Rc::new(vec![Instruction::Push(1, meta())]),
+            HashMap::new(),
+        );
+        let f2 = CallFrame::new(
+            Rc::new(vec![Instruction::Add(meta())]),
+            HashMap::new(),
+        );
+        let result = format_frames(&[f1, f2]);
+        assert!(result.contains("2 frames"));
+        assert!(result.contains("#0 main"));
+        assert!(result.contains("#1 func"));
+    }
+
+    // ── repl_help ────────────────────────────────────────────────
+
+    #[test]
+    fn repl_help_nonempty() {
+        assert!(!repl_help(false).is_empty());
+        assert!(!repl_help(true).is_empty());
+    }
+
+    #[test]
+    fn debug_help_has_more_commands() {
+        assert!(repl_help(true).len() > repl_help(false).len());
+    }
+
+    #[test]
+    fn debug_help_contains_step_command() {
+        assert!(repl_help(true).contains("step"));
+        assert!(!repl_help(false).contains("step"));
+    }
 }
 
 /// REPL 帮助文本

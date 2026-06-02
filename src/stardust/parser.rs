@@ -2,6 +2,7 @@ use crate::stardust::{
     ErrorKind, InstrMeta, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType,
 };
 use std::collections::HashMap;
+use std::rc::Rc;
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
@@ -49,10 +50,28 @@ impl Parser {
         self.resolve_main_marks()?;
         self.validate_mark_references()?;
         self.validate_function_mark_references()?;
+        // 为每个函数预计算 marks 并包装为 FunctionDef
+        let functions: HashMap<usize, crate::stardust::FunctionDef> = self
+            .functions
+            .into_iter()
+            .map(|(name, body)| {
+                let mut marks = HashMap::new();
+                for (idx, inst) in body.iter().enumerate() {
+                    if let Instruction::Mark { name: n, .. } = inst {
+                        marks.insert(*n, idx);
+                    }
+                }
+                (name, crate::stardust::FunctionDef {
+                    body: Rc::new(body),
+                    marks,
+                })
+            })
+            .collect();
+
         Ok(ParseResult {
             main_instructions: self.instructions,
             main_marks: self.marks,
-            functions: self.functions,
+            functions,
         })
     }
 
@@ -242,14 +261,13 @@ impl Parser {
     /// 在主指令序列中收集 Mark 位置，并检查重复
     fn resolve_main_marks(&mut self) -> Result<(), StardustError> {
         for (idx, inst) in self.instructions.iter().enumerate() {
-            if let Instruction::Mark { name, meta } = inst {
-                if self.marks.insert(*name, idx).is_some() {
+            if let Instruction::Mark { name, meta } = inst
+                && self.marks.insert(*name, idx).is_some() {
                     return Err(StardustError::new(
                         ErrorKind::DuplicateMark { name: *name },
                         Some(meta.span.clone()),
                     ));
                 }
-            }
         }
         Ok(())
     }
@@ -261,14 +279,13 @@ impl Parser {
         for inst in &self.instructions {
             match inst {
                 Instruction::Jump { name, meta } |
-                Instruction::UnconditionalJump { name, meta } => {
-                    if !self.marks.contains_key(name) {
+                Instruction::UnconditionalJump { name, meta }
+                    if !self.marks.contains_key(name) => {
                         return Err(StardustError::new(
                             ErrorKind::UndefinedMark { name: *name },
                             Some(meta.span.clone()),
                         ));
                     }
-                }
                 _ => {}
             }
         }
@@ -277,31 +294,29 @@ impl Parser {
 
     /// 验证所有函数体内的 Mark 引用完整性
     fn validate_function_mark_references(&self) -> Result<(), StardustError> {
-        for (_func_name, body) in &self.functions {
+        for body in self.functions.values() {
             // 收集该函数体内的 marks
             let mut func_marks: HashMap<usize, usize> = HashMap::new();
             for (idx, inst) in body.iter().enumerate() {
-                if let Instruction::Mark { name, meta } = inst {
-                    if func_marks.insert(*name, idx).is_some() {
+                if let Instruction::Mark { name, meta } = inst
+                    && func_marks.insert(*name, idx).is_some() {
                         return Err(StardustError::new(
                             ErrorKind::DuplicateMark { name: *name },
                             Some(meta.span.clone()),
                         ));
                     }
-                }
             }
             // 验证该函数体内的 Jump/UnconditionalJump 引用
             for inst in body {
                 match inst {
                     Instruction::Jump { name, meta } |
-                    Instruction::UnconditionalJump { name, meta } => {
-                        if !func_marks.contains_key(name) {
+                    Instruction::UnconditionalJump { name, meta }
+                        if !func_marks.contains_key(name) => {
                             return Err(StardustError::new(
                                 ErrorKind::UndefinedMark { name: *name },
                                 Some(meta.span.clone()),
                             ));
                         }
-                    }
                     _ => {}
                 }
             }
@@ -569,7 +584,7 @@ mod tests {
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
         assert!(result.functions.contains_key(&1));
-        let body = &result.functions[&1];
+        let body = &result.functions[&1].body;
         assert_eq!(body.len(), 2);
         assert_eq!(body[0], Instruction::Push(0, meta()));
         assert_eq!(body[1], Instruction::CharOut(meta()));
@@ -591,7 +606,7 @@ mod tests {
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
         assert!(result.functions.contains_key(&2));
-        assert_eq!(result.functions[&2].len(), 5);
+        assert_eq!(result.functions[&2].body.len(), 5);
     }
 
     #[test]
@@ -621,7 +636,7 @@ mod tests {
     #[test]
     fn function_with_nested_call_is_allowed_by_parser() {
         // Parser 允许函数体内出现调用语法（Colon + Semicolon）
-        // VM 运行时会拒绝（CallInsideFunction 错误由 VM 检查）
+        // VM 通过 CallFrame 栈完全支持嵌套调用
         let tokens = vec![
             colon(1),
             colon(2), semicolon(3),  // Call(name=2, argc=3) — 函数体内调用
@@ -629,7 +644,7 @@ mod tests {
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
-        let body = &result.functions[&1];
+        let body = &result.functions[&1].body;
         assert_eq!(body.len(), 1);
         assert_eq!(body[0], Instruction::Call { name: 2, argc: 3, meta: meta() });
     }

@@ -1,6 +1,6 @@
 # Stardust Language
 
-> **v0.1.4** — 一种受 Starry 启发的 esolang，程序仅由空格与少量符号构成，指令语义由前导空格数量决定。
+> **v0.1.5** — 一种受 Starry 启发的 esolang，程序仅由空格与少量符号构成，指令语义由前导空格数量决定。
 
 ---
 
@@ -304,11 +304,33 @@ stardust --check code.sd
 | 1 | `DumpState` | VM 状态 → stderr |
 | 2 | `Breakpoint` | 调试断点（调试模式下暂停） |
 
+#### 运行时注解（`#[key=value]`）
+
+在 `.sd` 源码顶部使用注解配置运行时参数（词法分析前提取）：
+
+```text
+#[max_steps=5000000]
+#[max_stack=524288]
+#[max_heap=262144]
+#[max_call_depth=128]
+#[time_limit=30]
+#[char_mode=unicode]
+```
+
+| 注解 | 默认值 | 说明 |
+|------|--------|------|
+| `max_steps` | 10,000,000 (0=无限制) | 最大执行步数 |
+| `max_stack` | 1,048,576 | 每帧最大栈大小 |
+| `max_heap` | 1,048,576 | 最大堆条目数 |
+| `max_call_depth` | 256 | 最大调用深度 |
+| `time_limit` | 无限制 (秒) | Wall-clock 时间限制 |
+| `char_mode` | ascii | `ascii` (0-127) 或 `unicode` (全码点) |
+
 ---
 
 ## VSCode 扩展
 
-安装 `stardust-vscode/stardust-0.1.4.vsix` 获得：
+安装 `build/stardust-0.1.5.vsix`（或从 `stardust-vscode/` 目录运行 `npx vsce package` 构建）获得：
 
 - **语法高亮**：`.sd` / `.stardust` 文件的符号着色
 - **悬停提示**：鼠标悬停显示指令语义和栈变化
@@ -332,10 +354,11 @@ esolang_stardust/
 │   ├── lib.rs                      # 库入口
 │   ├── stardust/
 │   │   ├── mod.rs                  # 核心类型、VM 结构体
+│   │   ├── config.rs               # VmConfig 运行时配置 + [#key=value] 注解解析
 │   │   ├── lexer.rs                # 词法分析器
 │   │   ├── parser.rs               # 语法分析器
-│   │   ├── vm.rs                   # 栈式虚拟机
-│   │   ├── error.rs                # 错误类型系统
+│   │   ├── vm.rs                   # 栈式虚拟机 + VmIO trait + VmSnapshot
+│   │   ├── error.rs                # 错误类型系统（35+ 变体）
 │   │   ├── utils.rs                # 工具函数
 │   │   └── debugger.rs             # 交互式调试器
 │   ├── codegen/
@@ -354,6 +377,11 @@ esolang_stardust/
 ├── stardust-vscode/                # VSCode 扩展
 ├── tests/
 │   └── integration_test.rs         # 集成测试（99 个）
+├── .github/workflows/
+│   └── ci.yml                      # GitHub Actions CI 流水线
+├── .rustfmt.toml                   # Rust 格式化配置
+├── .clippy.toml                    # Clippy lint 配置
+├── rust-toolchain.toml             # Rust 工具链版本
 ├── hello_world.sd                  # Hello World 示例
 └── Cargo.toml
 ```
@@ -362,11 +390,14 @@ esolang_stardust/
 
 ## 技术细节
 
-- **语言**：Rust 2024 Edition
-- **依赖**：`serde` + `serde_json`（JSON 序列化）
-- **测试**：377 个测试，覆盖词法/语法/VM/优化器/编译器/REPL/调试器
-- **错误处理**：30+ 错误类型，均带源码行列定位
-- **编译器**：零额外 Rust 依赖，生成 LLVM IR 文本 → `clang` 编译为二进制
+- **语言**：Rust 2024 Edition (MSRV 1.85)
+- **Rust 依赖**：`serde` + `serde_json`（JSON 序列化，仅 CLI 模式需要）
+- **LLVM 工具链**：`clang` + `llc`（仅 `--build` 编译为可执行文件时需要）
+- **测试**：303+ 单元测试 + 99 集成测试，覆盖词法/语法/VM/优化器/编译器/REPL/调试器/配置
+- **错误处理**：35+ 错误类型，均带源码行列定位；支持 VmSnapshot 错误状态快照
+- **运行时配置**：`#[key=value]` 源码注解配置步数/时间/栈/堆/调用深度/字符模式
+- **编译器**：纯标准库实现（零额外 crate），生成 LLVM IR 文本 → `clang` 编译为二进制
+- **可嵌入性**：`VmIO` trait 抽象 I/O（默认 StdIO，可注入 mock 用于测试/IDE 集成）
 - **调试器**：基于 `Option::take()` 模式解除 `&mut debug` / `&VM` 借用冲突
 
 ---
@@ -377,4 +408,4 @@ MIT
 
 ## Author
 
-freebird <freebirdflyinthesky@outlook.com>
+hamfreebird <freebirdflyinthesky@outlook.com>

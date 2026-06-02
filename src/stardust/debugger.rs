@@ -20,6 +20,12 @@ pub struct Debugger {
     single_step: bool,
 }
 
+impl Default for Debugger {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Debugger {
     pub fn new() -> Self {
         Debugger {
@@ -46,11 +52,10 @@ impl Debugger {
             return true;
         }
         for bp_name in &self.breakpoints {
-            if let Some(&target_pc) = marks.get(bp_name) {
-                if target_pc == pc {
+            if let Some(&target_pc) = marks.get(bp_name)
+                && target_pc == pc {
                     return true;
                 }
-            }
         }
         false
     }
@@ -82,12 +87,11 @@ impl Debugger {
 
                 // 断点管理
                 cmd if cmd.starts_with("b ") || cmd.starts_with("break ") => {
-                    if let Some(ns) = cmd.split_whitespace().nth(1) {
-                        if let Ok(n) = ns.parse::<usize>() {
+                    if let Some(ns) = cmd.split_whitespace().nth(1)
+                        && let Ok(n) = ns.parse::<usize>() {
                             self.breakpoints.insert(n);
                             eprintln!("Breakpoint set at Mark({}).", n);
                         }
-                    }
                 }
                 "lb" => {
                     if self.breakpoints.is_empty() {
@@ -99,12 +103,11 @@ impl Debugger {
                     }
                 }
                 cmd if cmd.starts_with("db ") => {
-                    if let Some(ns) = cmd.split_whitespace().nth(1) {
-                        if let Ok(n) = ns.parse::<usize>() {
+                    if let Some(ns) = cmd.split_whitespace().nth(1)
+                        && let Ok(n) = ns.parse::<usize>() {
                             self.breakpoints.remove(&n);
                             eprintln!("Removed breakpoint at Mark({}).", n);
                         }
-                    }
                 }
 
                 // 状态查看
@@ -133,7 +136,7 @@ impl Debugger {
             n => format!("func #{}", n),
         };
         let next = if frame.pc < frame.instructions.len() {
-            format_inst(&frame.instructions[frame.pc])
+            frame.instructions[frame.pc].format()
         } else {
             "(end)".into()
         };
@@ -217,7 +220,7 @@ impl Debugger {
                 "  {} {:4}: {}{}",
                 mark,
                 i,
-                format_inst(&frame.instructions[i]),
+                frame.instructions[i].format(),
                 mark_str
             );
         }
@@ -226,7 +229,7 @@ impl Debugger {
     fn print_pc(&self, vm: &VM) {
         let frame = vm.current_frame();
         if frame.pc < frame.instructions.len() {
-            eprintln!("  PC: {}  {}", frame.pc, format_inst(&frame.instructions[frame.pc]));
+            eprintln!("  PC: {}  {}", frame.pc, frame.instructions[frame.pc].format());
         } else {
             eprintln!("  PC: {}  (end)", frame.pc);
         }
@@ -268,48 +271,9 @@ impl Debugger {
 
 // ── 辅助函数 ───────────────────────────────────────────────
 
+/// 公开包装器：委托给 Instruction::format()
 pub fn format_inst(inst: &Instruction) -> String {
-    match inst {
-        Instruction::Push(n, _) => format!("Push({})", n),
-        Instruction::Dup(_) => "Dup".into(),
-        Instruction::Swap(_) => "Swap".into(),
-        Instruction::Rotate(_) => "Rotate".into(),
-        Instruction::Pop(_) => "Pop".into(),
-        Instruction::Add(_) => "Add".into(),
-        Instruction::Sub(_) => "Sub".into(),
-        Instruction::Mul(_) => "Mul".into(),
-        Instruction::Div(_) => "Div".into(),
-        Instruction::Mod(_) => "Mod".into(),
-        Instruction::Reverse(_) => "Reverse".into(),
-        Instruction::NumOut(_) => "NumOut".into(),
-        Instruction::NumIn(_) => "NumIn".into(),
-        Instruction::CharOut(_) => "CharOut".into(),
-        Instruction::CharIn(_) => "CharIn".into(),
-        Instruction::Mark { name, .. } => format!("Mark({})", name),
-        Instruction::Jump { name, .. } => format!("Jump({})", name),
-        Instruction::UnconditionalJump { name, .. } => format!("UncondJump({})", name),
-        Instruction::Call { name, argc, .. } => format!("Call(func={}, argc={})", name, argc),
-        Instruction::Eq(_) => "Eq".into(),
-        Instruction::Ne(_) => "Ne".into(),
-        Instruction::Lt(_) => "Lt".into(),
-        Instruction::Gt(_) => "Gt".into(),
-        Instruction::Le(_) => "Le".into(),
-        Instruction::Ge(_) => "Ge".into(),
-        Instruction::And(_) => "And".into(),
-        Instruction::Or(_) => "Or".into(),
-        Instruction::Not(_) => "Not".into(),
-        Instruction::Xor(_) => "Xor".into(),
-        Instruction::Store(_) => "Store".into(),
-        Instruction::Load(_) => "Load".into(),
-        Instruction::ShiftL(_) => "ShiftL".into(),
-        Instruction::Depth(_) => "Depth".into(),
-        Instruction::Pick(_) => "Pick".into(),
-        Instruction::ShiftR(_) => "ShiftR".into(),
-        Instruction::DropN(_) => "DropN".into(),
-        Instruction::DumpStack(_) => "DumpStack".into(),
-        Instruction::DumpState(_) => "DumpState".into(),
-        Instruction::Breakpoint(_) => "Breakpoint".into(),
-    }
+    inst.format()
 }
 
 pub fn inst_meta(inst: &Instruction) -> &InstrMeta {
