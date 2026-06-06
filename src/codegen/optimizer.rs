@@ -29,10 +29,7 @@ pub fn optimize(instructions: &[Instruction]) -> Vec<Instruction> {
 pub fn optimize_functions(
     main_instructions: &[Instruction],
     functions: &std::collections::HashMap<usize, crate::stardust::FunctionDef>,
-) -> (
-    Vec<Instruction>,
-    std::collections::HashMap<usize, crate::stardust::FunctionDef>,
-) {
+) -> (Vec<Instruction>, std::collections::HashMap<usize, crate::stardust::FunctionDef>) {
     use std::rc::Rc;
     let main_opt = optimize(main_instructions);
     let mut funcs_opt = std::collections::HashMap::new();
@@ -77,66 +74,50 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
 
     // 模式: Push(a) Push(b) Add  →  Push(a+b)   (需要 a,b 都在 i64 安全范围内)
     if pos + 2 < instrs.len() {
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Add(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-            && let Some(r) = a.checked_add(*b) {
-                return Some((vec![Instruction::Push(r, meta.clone())], 3));
-            }
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Add(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+            && let Some(r) = a.checked_add(*b)
+        {
+            return Some((vec![Instruction::Push(r, meta.clone())], 3));
+        }
 
         // Push(a) Push(b) Sub  →  Push(a-b)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Sub(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-            && let Some(r) = a.checked_sub(*b) {
-                return Some((vec![Instruction::Push(r, meta.clone())], 3));
-            }
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Sub(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+            && let Some(r) = a.checked_sub(*b)
+        {
+            return Some((vec![Instruction::Push(r, meta.clone())], 3));
+        }
 
         // Push(a) Push(b) Mul  →  Push(a*b)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Mul(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-            && let Some(r) = a.checked_mul(*b) {
-                return Some((vec![Instruction::Push(r, meta.clone())], 3));
-            }
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Mul(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+            && let Some(r) = a.checked_mul(*b)
+        {
+            return Some((vec![Instruction::Push(r, meta.clone())], 3));
+        }
 
         // Push(a) Push(b) Div  →  Push(a/b)  (b != 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Div(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-            && *b != 0 {
-                return Some((vec![Instruction::Push(a / b, meta.clone())], 3));
-            }
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Div(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+            && *b != 0
+        {
+            return Some((vec![Instruction::Push(a / b, meta.clone())], 3));
+        }
 
         // Push(a) Push(b) Mod  →  Push(a%b)  (b != 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Mod(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
-            && *b != 0 {
-                return Some((vec![Instruction::Push(a % b, meta.clone())], 3));
-            }
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Mod(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+            && *b != 0
+        {
+            return Some((vec![Instruction::Push(a % b, meta.clone())], 3));
+        }
 
         // Push(a) Push(b) Eq → Push(1 or 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Eq(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Eq(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
         {
-            return Some((
-                vec![Instruction::Push(if a == b { 1 } else { 0 }, meta.clone())],
-                3,
-            ));
+            return Some((vec![Instruction::Push(if a == b { 1 } else { 0 }, meta.clone())], 3));
         }
 
         // Push(a) Push(b) 比较运算折叠
@@ -165,67 +146,44 @@ fn try_fold_window(instrs: &[Instruction], pos: usize) -> Option<(Vec<Instructio
         }
 
         // Push(a) Push(b) And → Push(1 or 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::And(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::And(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
         {
             return Some((
-                vec![Instruction::Push(
-                    if *a != 0 && *b != 0 { 1 } else { 0 },
-                    meta.clone(),
-                )],
+                vec![Instruction::Push(if *a != 0 && *b != 0 { 1 } else { 0 }, meta.clone())],
                 3,
             ));
         }
 
         // Push(a) Push(b) Or → Push(1 or 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Or(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Or(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
         {
             return Some((
-                vec![Instruction::Push(
-                    if *a != 0 || *b != 0 { 1 } else { 0 },
-                    meta.clone(),
-                )],
+                vec![Instruction::Push(if *a != 0 || *b != 0 { 1 } else { 0 }, meta.clone())],
                 3,
             ));
         }
 
         // Push(a) Push(b) Xor → Push(1 or 0)
-        if let (
-            Instruction::Push(a, _),
-            Instruction::Push(b, _),
-            Instruction::Xor(_),
-        ) = (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
+        if let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Xor(_)) =
+            (&instrs[pos], &instrs[pos + 1], &instrs[pos + 2])
         {
             return Some((
-                vec![Instruction::Push(
-                    if (*a != 0) ^ (*b != 0) { 1 } else { 0 },
-                    meta.clone(),
-                )],
+                vec![Instruction::Push(if (*a != 0) ^ (*b != 0) { 1 } else { 0 }, meta.clone())],
                 3,
             ));
         }
-
     }
 
     // ── 2 指令窗口模式（在 pos+2 检查之外）──────────────────
 
     // Push(a) Not → Push(1 or 0)
     if pos + 1 < instrs.len()
-        && let (Instruction::Push(a, _), Instruction::Not(_)) =
-            (&instrs[pos], &instrs[pos + 1])
-        {
-            return Some((
-                vec![Instruction::Push(if *a == 0 { 1 } else { 0 }, meta.clone())],
-                2,
-            ));
-        }
+        && let (Instruction::Push(a, _), Instruction::Not(_)) = (&instrs[pos], &instrs[pos + 1])
+    {
+        return Some((vec![Instruction::Push(if *a == 0 { 1 } else { 0 }, meta.clone())], 2));
+    }
 
     // 模式: Push(0) Jump(name)  →  UncondJump(name)   (Jump 知道栈顶是 0，永不跳转，相当于 NOP)
     // 模式: Push(nonzero) Jump(name)  →  UncondJump(name)   (条件恒真 → 无条件)
@@ -285,17 +243,14 @@ fn peephole(instructions: &[Instruction]) -> Vec<Instruction> {
         let applied = {
             // Push(a) Push(b) Swap → Push(b) Push(a)
             if i + 2 < instructions.len()
-                && let (
-                    Instruction::Push(a, _),
-                    Instruction::Push(b, _),
-                    Instruction::Swap(_),
-                ) = (&instructions[i], &instructions[i + 1], &instructions[i + 2])
-                {
-                    result.push(Instruction::Push(*b, meta.clone()));
-                    result.push(Instruction::Push(*a, meta.clone()));
-                    i += 3;
-                    continue;
-                }
+                && let (Instruction::Push(a, _), Instruction::Push(b, _), Instruction::Swap(_)) =
+                    (&instructions[i], &instructions[i + 1], &instructions[i + 2])
+            {
+                result.push(Instruction::Push(*b, meta.clone()));
+                result.push(Instruction::Push(*a, meta.clone()));
+                i += 3;
+                continue;
+            }
 
             // Push(0) Add → nothing (加 0 无影响)
             if i + 1 < instructions.len() {
@@ -327,10 +282,10 @@ fn peephole(instructions: &[Instruction]) -> Vec<Instruction> {
             if i + 1 < instructions.len()
                 && let (Instruction::Reverse(_), Instruction::Reverse(_)) =
                     (&instructions[i], &instructions[i + 1])
-                {
-                    i += 2;
-                    continue;
-                }
+            {
+                i += 2;
+                continue;
+            }
 
             // ShiftL ShiftR → nothing (循环左移+右移恢复原状)
             if i + 1 < instructions.len() {
@@ -522,13 +477,8 @@ mod tests {
     #[test]
     fn chain_fold() {
         // Push(2) Push(3) Mul Push(4) Add → Push(10)
-        let input = vec![
-            push(2),
-            push(3),
-            Instruction::Mul(meta()),
-            push(4),
-            Instruction::Add(meta()),
-        ];
+        let input =
+            vec![push(2), push(3), Instruction::Mul(meta()), push(4), Instruction::Add(meta())];
         let result = optimize(&input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], push(10));
@@ -541,14 +491,8 @@ mod tests {
             push(5),
             push(3),
             Instruction::Add(meta()), // 可折叠
-            Instruction::Mark {
-                name: 0,
-                meta: meta(),
-            },
-            Instruction::Jump {
-                name: 0,
-                meta: meta(),
-            },
+            Instruction::Mark { name: 0, meta: meta() },
+            Instruction::Jump { name: 0, meta: meta() },
         ];
         let result = optimize(&input);
         assert_eq!(result.len(), 3);
@@ -588,13 +532,8 @@ mod tests {
     #[test]
     fn peephole_push_zero_add_removed() {
         // Push(0) Add → nothing (x + 0 = x)
-        let input = vec![
-            push(5),
-            push(0),
-            Instruction::Add(meta()),
-            push(0),
-            Instruction::Add(meta()),
-        ];
+        let input =
+            vec![push(5), push(0), Instruction::Add(meta()), push(0), Instruction::Add(meta())];
         let result = optimize(&input);
         // After folding: Push(5) Push(0) Add → Push(5), then Push(0) Add → Push(5)
         assert_eq!(result.len(), 1);
@@ -731,13 +670,8 @@ mod tests {
     #[test]
     fn dead_multiple_pops() {
         // Push(1) Push(2) Push(3) Pop Pop → Push(1)
-        let input = vec![
-            push(1),
-            push(2),
-            push(3),
-            Instruction::Pop(meta()),
-            Instruction::Pop(meta()),
-        ];
+        let input =
+            vec![push(1), push(2), push(3), Instruction::Pop(meta()), Instruction::Pop(meta())];
         let result = optimize(&input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], push(1));

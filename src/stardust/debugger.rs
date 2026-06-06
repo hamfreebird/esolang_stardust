@@ -53,9 +53,10 @@ impl Debugger {
         }
         for bp_name in &self.breakpoints {
             if let Some(&target_pc) = marks.get(bp_name)
-                && target_pc == pc {
-                    return true;
-                }
+                && target_pc == pc
+            {
+                return true;
+            }
         }
         false
     }
@@ -88,10 +89,11 @@ impl Debugger {
                 // 断点管理
                 cmd if cmd.starts_with("b ") || cmd.starts_with("break ") => {
                     if let Some(ns) = cmd.split_whitespace().nth(1)
-                        && let Ok(n) = ns.parse::<usize>() {
-                            self.breakpoints.insert(n);
-                            eprintln!("Breakpoint set at Mark({}).", n);
-                        }
+                        && let Ok(n) = ns.parse::<usize>()
+                    {
+                        self.breakpoints.insert(n);
+                        eprintln!("Breakpoint set at Mark({}).", n);
+                    }
                 }
                 "lb" => {
                     if self.breakpoints.is_empty() {
@@ -104,10 +106,11 @@ impl Debugger {
                 }
                 cmd if cmd.starts_with("db ") => {
                     if let Some(ns) = cmd.split_whitespace().nth(1)
-                        && let Ok(n) = ns.parse::<usize>() {
-                            self.breakpoints.remove(&n);
-                            eprintln!("Removed breakpoint at Mark({}).", n);
-                        }
+                        && let Ok(n) = ns.parse::<usize>()
+                    {
+                        self.breakpoints.remove(&n);
+                        eprintln!("Removed breakpoint at Mark({}).", n);
+                    }
                 }
 
                 // 状态查看
@@ -216,13 +219,7 @@ impl Debugger {
             } else {
                 format!("  ; {}", marks_at.join(", "))
             };
-            eprintln!(
-                "  {} {:4}: {}{}",
-                mark,
-                i,
-                frame.instructions[i].format(),
-                mark_str
-            );
+            eprintln!("  {} {:4}: {}{}", mark, i, frame.instructions[i].format(), mark_str);
         }
     }
 

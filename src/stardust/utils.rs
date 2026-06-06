@@ -1,16 +1,16 @@
 use crate::extension::unwind::{preprocess, simple_preprocess};
-use crate::stardust::{ErrorKind, Instruction, StageResult, StardustError};
-use std::char::ParseCharError;
-use std::path::{Path, PathBuf};
-use std::{fs, process};
-use std::io::Write;
 use crate::stardust::lexer::tokenize;
 use crate::stardust::parser::parse_program;
+use crate::stardust::{ErrorKind, Instruction, StageResult, StardustError};
+use std::char::ParseCharError;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::{fs, process};
 
 impl From<ParseCharError> for StardustError {
     fn from(err: ParseCharError) -> Self {
         StardustError {
-            kind: ErrorKind::ParseChar,            // 字符解析错误
+            kind: ErrorKind::ParseChar, // 字符解析错误
             span: None,
             message: err.to_string(),
         }
@@ -19,11 +19,7 @@ impl From<ParseCharError> for StardustError {
 
 impl From<std::io::Error> for StardustError {
     fn from(err: std::io::Error) -> Self {
-        StardustError {
-            kind: ErrorKind::StdIoError,
-            span: None,
-            message: err.to_string(),
-        }
+        StardustError { kind: ErrorKind::StdIoError, span: None, message: err.to_string() }
     }
 }
 
@@ -96,26 +92,21 @@ pub fn compile_file_to_stardust(
     Ok(())
 }
 
-fn natural_source_code(
-    content: String,
-    input_path: &str
-) -> Result<String, StardustError> {
-    let mut chars_vec: Vec<String> = content.chars()
-        .map(|c| c.to_string())
-        .collect();
+fn natural_source_code(content: String, input_path: &str) -> Result<String, StardustError> {
+    let mut chars_vec: Vec<String> = content.chars().map(|c| c.to_string()).collect();
     let copy_chars_vec = chars_vec.clone();
 
     let mut in_anno: bool = false;
     for (index, char) in chars_vec.iter_mut().enumerate() {
         if in_anno {
-            continue
+            continue;
         };
         let _char = char.chars().next().unwrap();
         if _char.is_whitespace() | is_symbol(_char) {
-            if _char == '\n'{
+            if _char == '\n' {
                 in_anno = false;
             }
-            continue
+            continue;
         } else if is_anno(_char) && is_anno(copy_chars_vec[index].parse()?) {
             in_anno = true;
         } else if _char.is_ascii() {
@@ -136,8 +127,10 @@ fn natural_source_code(
 }
 
 fn is_symbol(ch: char) -> bool {
-    matches!(ch, '+' | '*' | '`' | '\'' | ':' | ';' | '.' | ','
-    | '-' | '=' | '<' | '>' | '&' | '~' | '#')
+    matches!(
+        ch,
+        '+' | '*' | '`' | '\'' | ':' | ';' | '.' | ',' | '-' | '=' | '<' | '>' | '&' | '~' | '#'
+    )
 }
 
 fn is_anno(ch: char) -> bool {
@@ -149,15 +142,11 @@ pub fn compile_file_auto(input_path: &str) -> Result<(), StardustError> {
     compile_file_to_stardust(input_path, None)
 }
 
-pub fn bump_source(
-     input_file: &String,
-     output_file: Option<&str>
-) -> Result<(), StardustError> {
-
+pub fn bump_source(input_file: &String, output_file: Option<&str>) -> Result<(), StardustError> {
     let bump_film = format_results(&bump_run_source(input_file));
 
     // 确定输出文件路径
-    let out_path = match output_file{
+    let out_path = match output_file {
         Some(p) => PathBuf::from(p),
         None => {
             let path = Path::new(input_file);
@@ -176,12 +165,8 @@ pub fn bump_source(
 }
 
 pub fn bump_run_source(filename: &String) -> Vec<StageResult> {
-    let mut results = vec![
-        StageResult::None,
-        StageResult::None,
-        StageResult::None,
-        StageResult::None,
-    ];
+    let mut results =
+        vec![StageResult::None, StageResult::None, StageResult::None, StageResult::None];
 
     let source = match fs::read_to_string(filename) {
         Ok(content) => {
@@ -271,11 +256,7 @@ pub fn format_results(results: &[StageResult]) -> String {
     let stage_names = ["1. Source", "2. Unwind Source", "3. Tokens", "4. Parsed"];
 
     for (i, stage_result) in results.iter().enumerate() {
-        let stage_title = if i < stage_names.len() {
-            stage_names[i]
-        } else {
-            "Extra Stage"
-        };
+        let stage_title = if i < stage_names.len() { stage_names[i] } else { "Extra Stage" };
         writeln!(output, "=== {} ===", stage_title).unwrap();
 
         match stage_result {
@@ -321,7 +302,7 @@ pub fn format_results(results: &[StageResult]) -> String {
                             "[{:3}] line {:3}:{:3} | spaces={} | {:?}",
                             idx, tok.line, tok.column, tok.spaces, tok.token_type
                         )
-                            .unwrap();
+                        .unwrap();
                     }
                 }
             }
@@ -343,7 +324,8 @@ pub fn format_results(results: &[StageResult]) -> String {
                 if !parsed.main_marks.is_empty() {
                     writeln!(output, "Main marks:").unwrap();
                     for (mark_name, &instr_idx) in parsed.main_marks.iter() {
-                        writeln!(output, "  mark {} -> instruction index {}", mark_name, instr_idx).unwrap();
+                        writeln!(output, "  mark {} -> instruction index {}", mark_name, instr_idx)
+                            .unwrap();
                     }
                 } else {
                     writeln!(output, "Main marks: (none)").unwrap();
@@ -352,9 +334,16 @@ pub fn format_results(results: &[StageResult]) -> String {
                 if !parsed.functions.is_empty() {
                     writeln!(output, "Functions:").unwrap();
                     for (func_name, func_def) in parsed.functions.iter() {
-                        writeln!(output, "  function {} ({} instructions):", func_name, func_def.body.len()).unwrap();
+                        writeln!(
+                            output,
+                            "  function {} ({} instructions):",
+                            func_name,
+                            func_def.body.len()
+                        )
+                        .unwrap();
                         for (idx, instr) in func_def.body.iter().enumerate() {
-                            writeln!(output, "    {:3}: {}", idx, format_instruction(instr)).unwrap();
+                            writeln!(output, "    {:3}: {}", idx, format_instruction(instr))
+                                .unwrap();
                         }
                     }
                 } else {
@@ -378,10 +367,16 @@ pub fn format_results(results: &[StageResult]) -> String {
 pub fn print_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} <file.stardust|file.sd>           Run a Stardust program", program);
-    eprintln!("  {} --check <file.sd>                 Check syntax, output JSON diagnostics", program);
+    eprintln!(
+        "  {} --check <file.sd>                 Check syntax, output JSON diagnostics",
+        program
+    );
     eprintln!("  {} --tokens <file.sd>                Output token stream as JSON", program);
     eprintln!("  {} --stardust <input.txt> [output]   Compile text file to Stardust code", program);
-    eprintln!("  {} --dump <file.sd> [output]         Analyze and dump all pipeline stages", program);
+    eprintln!(
+        "  {} --dump <file.sd> [output]         Analyze and dump all pipeline stages",
+        program
+    );
     eprintln!("  {} --help                            Show this help", program);
 }
 
@@ -391,12 +386,13 @@ pub fn print_error(error: &StardustError, source: &str, filename: &str) {
         eprintln!("  --> {}:{}:{}", filename, span.line, span.column);
         // 打印源代码行（防御性：line/column 为 0 时不尝试打印）
         if span.line > 0
-            && let Some(line) = source.lines().nth(span.line.saturating_sub(1)) {
-                eprintln!("   |");
-                eprintln!("{:3} | {}", span.line, line);
-                let col = span.column.saturating_sub(1);
-                eprintln!("   | {}^", " ".repeat(col));
-            }
+            && let Some(line) = source.lines().nth(span.line.saturating_sub(1))
+        {
+            eprintln!("   |");
+            eprintln!("{:3} | {}", span.line, line);
+            let col = span.column.saturating_sub(1);
+            eprintln!("   | {}^", " ".repeat(col));
+        }
     }
     if let ErrorKind::IoError { reason } = &error.kind {
         eprintln!("  I/O details: {}", reason);

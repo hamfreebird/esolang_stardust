@@ -85,9 +85,7 @@ fn parse_one(input: &str) -> Result<(Instruction, &str), ParseReplError> {
     let meta = InstrMeta::default();
 
     // 提取指令名（到空格或 '(' 为止）
-    let name_end = input
-        .find(|c: char| c.is_whitespace() || c == '(')
-        .unwrap_or(input.len());
+    let name_end = input.find(|c: char| c.is_whitespace() || c == '(').unwrap_or(input.len());
     let name = &input[..name_end];
     let rest = &input[name_end..];
 
@@ -161,9 +159,7 @@ fn parse_one_arg(input: &str) -> Result<(i64, &str), ParseReplError> {
     }
     let close = input.find(')').ok_or(ParseReplError::UnclosedParen)?;
     let inner = &input[1..close].trim();
-    let n: i64 = inner
-        .parse()
-        .map_err(|_| ParseReplError::InvalidNumber(inner.to_string()))?;
+    let n: i64 = inner.parse().map_err(|_| ParseReplError::InvalidNumber(inner.to_string()))?;
     Ok((n, &input[close + 1..]))
 }
 
@@ -209,10 +205,7 @@ mod tests {
     #[test]
     fn parse_multiple() {
         let r = parse_shorthand("Push(72) CharOut").unwrap();
-        assert_eq!(
-            r,
-            vec![Instruction::Push(72, meta()), Instruction::CharOut(meta())]
-        );
+        assert_eq!(r, vec![Instruction::Push(72, meta()), Instruction::CharOut(meta())]);
     }
 
     #[test]

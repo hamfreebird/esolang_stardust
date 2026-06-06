@@ -1,5 +1,5 @@
-use std::fmt;
 use crate::stardust::{ErrorKind, SourceSpan, StardustError};
+use std::fmt;
 
 impl fmt::Display for SourceSpan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

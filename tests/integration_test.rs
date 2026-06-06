@@ -2,9 +2,9 @@
 // Stardust 集成测试 — 测试完整流水线：词法分析 → 语法分析 → VM 执行
 // ============================================================================
 
+use esolang_stardust::stardust::config::VmConfig;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
-use esolang_stardust::stardust::config::VmConfig;
 use esolang_stardust::stardust::{ErrorKind, StardustError, VM};
 
 // ── 辅助函数：生成精确空格数 ──────────────────────────────────────
@@ -40,38 +40,92 @@ fn func(name: usize, body: &str) -> String {
 }
 
 /// 无空格符号的简写
-fn add() -> String { "*".to_string() }
-fn sub() -> String { " *".to_string() }
-fn mul() -> String { "  *".to_string() }
-fn div() -> String { "   *".to_string() }
-fn rem() -> String { "    *".to_string() }
-fn reverse() -> String { "     *".to_string() }
-fn dup() -> String { " +".to_string() }
-fn swap() -> String { "  +".to_string() }
-fn rotate() -> String { "   +".to_string() }
-fn pop() -> String { "    +".to_string() }
-fn num_out() -> String { ".".to_string() }
-fn char_out() -> String { ",".to_string() }
+fn add() -> String {
+    "*".to_string()
+}
+fn sub() -> String {
+    " *".to_string()
+}
+fn mul() -> String {
+    "  *".to_string()
+}
+fn div() -> String {
+    "   *".to_string()
+}
+fn rem() -> String {
+    "    *".to_string()
+}
+fn reverse() -> String {
+    "     *".to_string()
+}
+fn dup() -> String {
+    " +".to_string()
+}
+fn swap() -> String {
+    "  +".to_string()
+}
+fn rotate() -> String {
+    "   +".to_string()
+}
+fn pop() -> String {
+    "    +".to_string()
+}
+fn num_out() -> String {
+    ".".to_string()
+}
+fn char_out() -> String {
+    ",".to_string()
+}
 // 比较运算
-fn eq() -> String { "=".to_string() }
-fn ne() -> String { " =".to_string() }
-fn lt() -> String { "  =".to_string() }
-fn gt() -> String { "   =".to_string() }
+fn eq() -> String {
+    "=".to_string()
+}
+fn ne() -> String {
+    " =".to_string()
+}
+fn lt() -> String {
+    "  =".to_string()
+}
+fn gt() -> String {
+    "   =".to_string()
+}
 // 逻辑运算
-fn and() -> String { "&".to_string() }
-fn or() -> String { " &".to_string() }
-fn not() -> String { "  &".to_string() }
+fn and() -> String {
+    "&".to_string()
+}
+fn or() -> String {
+    " &".to_string()
+}
+fn not() -> String {
+    "  &".to_string()
+}
 // 堆操作
-fn store() -> String { "-".to_string() }
-fn load() -> String { " -".to_string() }
+fn store() -> String {
+    "-".to_string()
+}
+fn load() -> String {
+    " -".to_string()
+}
 // 栈扩展
-fn depth() -> String { " <".to_string() }
-fn shiftl() -> String { "<".to_string() }
-fn shiftr() -> String { ">".to_string() }
-fn dropn() -> String { " >".to_string() }
-fn pick() -> String { "  <".to_string() }
+fn depth() -> String {
+    " <".to_string()
+}
+fn shiftl() -> String {
+    "<".to_string()
+}
+fn shiftr() -> String {
+    ">".to_string()
+}
+fn dropn() -> String {
+    " >".to_string()
+}
+fn pick() -> String {
+    "  <".to_string()
+}
 // 调试
-fn dump_stack() -> String { "#".to_string() }
+fn dump_stack() -> String {
+    "#".to_string()
+}
 
 /// 辅助函数：运行完整流水线
 fn run(source: &str) -> Result<(), StardustError> {
@@ -232,16 +286,7 @@ fn multiple_char_out() {
 fn mark_and_jump_terminating_loop() {
     // Push(3)  Mark(0)  Dup  Push(1)  Sub  Dup  Jump(0)
     // 从 3 倒数到 0 的循环，栈顶为 0 时终止
-    let src = format!(
-        "{}{}{}{}{}{}{}",
-        push(3),
-        mark(0),
-        dup(),
-        push(1),
-        sub(),
-        dup(),
-        jump(0),
-    );
+    let src = format!("{}{}{}{}{}{}{}", push(3), mark(0), dup(), push(1), sub(), dup(), jump(0),);
     assert!(run(&src).is_ok());
 }
 
@@ -285,11 +330,7 @@ fn mark_name_zero_is_valid() {
 fn define_and_call_simple_function() {
     // (1): Push(65) CharOut (1):  — 定义函数 1
     // (1): (0);                   — 调用函数 1，0 个参数
-    let src = format!(
-        "{}{}",
-        func(1, &format!("{}{}", push(65), char_out())),
-        call(1, 0),
-    );
+    let src = format!("{}{}", func(1, &format!("{}{}", push(65), char_out())), call(1, 0),);
     assert!(run(&src).is_ok());
 }
 
@@ -316,12 +357,7 @@ fn undefined_function_errors() {
 #[test]
 fn not_enough_arguments_errors() {
     // 定义函数(1)接收 2 个参数，但只 Push 1 个值就调用
-    let src = format!(
-        "{}{}{}",
-        func(1, &format!("{}{}", add(), num_out())),
-        push(1),
-        call(1, 2),
-    );
+    let src = format!("{}{}{}", func(1, &format!("{}{}", add(), num_out())), push(1), call(1, 2),);
     let result = run(&src);
     assert!(result.is_err());
     match result.unwrap_err().kind {
@@ -349,11 +385,8 @@ fn multiple_functions() {
 fn function_returns_multiple_values() {
     // 定义函数(0): Push(10) Push(20) Push(30)
     // 调用: (0): (0); — 调用后主栈应有 [10, 20, 30]
-    let src = format!(
-        "{}{}",
-        func(0, &format!("{}{}{}", push(10), push(20), push(30))),
-        call(0, 0),
-    );
+    let src =
+        format!("{}{}", func(0, &format!("{}{}{}", push(10), push(20), push(30))), call(0, 0),);
     assert!(run(&src).is_ok());
 }
 
@@ -361,11 +394,7 @@ fn function_returns_multiple_values() {
 fn call_function_with_zero_arguments() {
     // 定义函数(0): Push(42)
     // 调用: (0): (0);
-    let src = format!(
-        "{}{}",
-        func(0, &push(42)),
-        call(0, 0),
-    );
+    let src = format!("{}{}", func(0, &push(42)), call(0, 0),);
     assert!(run(&src).is_ok());
 }
 
@@ -459,11 +488,7 @@ fn parse_error_duplicate_mark() {
 #[test]
 fn parse_error_duplicate_function() {
     // (0): Push(0) (0):  (0): Push(1) (0):  → 重复函数
-    let src = format!(
-        "{}{}",
-        func(0, &push(0)),
-        func(0, &push(1)),
-    );
+    let src = format!("{}{}", func(0, &push(0)), func(0, &push(1)),);
     let e = run(&src).unwrap_err();
     assert_eq!(e.kind, ErrorKind::DuplicateFunction { name: 0 });
 }
@@ -573,9 +598,9 @@ fn nested_function_calls() {
     // 主程序: (1): (0);
     let src = format!(
         "{}{}{}",
-        func(2, &format!("{}{}", push(66), char_out())),    // 函数2: 输出 B
+        func(2, &format!("{}{}", push(66), char_out())), // 函数2: 输出 B
         func(1, &format!("{}{}{}", push(65), char_out(), call(2, 0))), // 函数1: 输出 A 然后调用2
-        call(1, 0),                                          // 调用函数1
+        call(1, 0),                                      // 调用函数1
     );
     assert!(run(&src).is_ok());
 }
@@ -626,7 +651,7 @@ fn undefined_mark_in_function_caught_at_parse_time() {
     // 函数体内 Jump(99) 但 Mark(99) 不存在
     let src = format!(
         "{}{}",
-        func(1, &jump(99)),  // 函数1 内 Jump 到不存在的 Mark(99)
+        func(1, &jump(99)), // 函数1 内 Jump 到不存在的 Mark(99)
         call(1, 0),
     );
     let e = run(&src).unwrap_err();
@@ -799,10 +824,12 @@ fn compare_and_jump_conditional() {
     // 10==10 为真, Jump 弹出1, 跳转到 Mark(0), 然后 Push(1)
     let src = format!(
         "{}{}{}{}{}{}",
-        push(10), push(10), eq(), // [10, 10, 1]
-        jump(0),                   // 弹出1, 跳转
-        mark(0),                   // 跳转目标
-        push(1),                   // 执行: Push(1)
+        push(10),
+        push(10),
+        eq(),    // [10, 10, 1]
+        jump(0), // 弹出1, 跳转
+        mark(0), // 跳转目标
+        push(1), // 执行: Push(1)
     );
     assert!(run(&src).is_ok());
 }
@@ -866,10 +893,7 @@ mod codegen_tests {
     #[test]
     fn compile_arithmetic_and_verify_ir() {
         // Push(10) Push(20) Add Push(5) Sub → 10+20-5 = 25
-        let src = format!(
-            "{}{}{}{}{}",
-            push(10), push(20), add(), push(5), sub()
-        );
+        let src = format!("{}{}{}{}{}", push(10), push(20), add(), push(5), sub());
         let ir = compile_src_to_ir(&src);
         assert!(ir.contains("checked_add"), "should contain checked_add");
         assert!(ir.contains("checked_sub"), "should contain checked_sub");
@@ -907,8 +931,10 @@ mod codegen_tests {
         let ir = compile_src_to_ir(&src);
         // The checked_add FUNCTION DEFINITION is always in intrinsics,
         // but there should be no CALL to it from sd_main after folding
-        assert!(!ir.contains("call i64 @checked_add"),
-                "optimizer should fold 5+3, no checked_add CALL needed");
+        assert!(
+            !ir.contains("call i64 @checked_add"),
+            "optimizer should fold 5+3, no checked_add CALL needed"
+        );
         assert!(ir.contains("i64 8"), "folded constant should appear in IR");
         if let Some((_stdout, _stderr, code)) = compile_and_run(&ir) {
             assert_eq!(code, 0);
@@ -930,14 +956,14 @@ mod codegen_tests {
         // Pushes 3 then loops: dup, push 1, sub, dup, jump(0) until top is 0
         let src = format!(
             "{}{}{}{}{}{}{}{}",
-            push(3),                // initial counter
-            mark(0),                // loop start
-            dup(),                  // duplicate counter
-            push(1),                // push 1
-            sub(),                  // decrement
-            dup(),                  // duplicate for next iteration
-            jump(0),                // loop if nonzero
-            pop(),                  // clean up final zero
+            push(3), // initial counter
+            mark(0), // loop start
+            dup(),   // duplicate counter
+            push(1), // push 1
+            sub(),   // decrement
+            dup(),   // duplicate for next iteration
+            jump(0), // loop if nonzero
+            pop(),   // clean up final zero
         );
         let ir = compile_src_to_ir(&src);
         assert!(ir.contains("mark_0:"), "should have loop label");
@@ -948,11 +974,7 @@ mod codegen_tests {
     fn compile_function_call_and_run() {
         // (1): Push(65) CharOut (1):   — function that outputs 'A'
         // (1): (0);                    — call function 1 with 0 args
-        let src = format!(
-            "{}{}",
-            func(1, &format!("{}{}", push(65), char_out())),
-            call(1, 0),
-        );
+        let src = format!("{}{}", func(1, &format!("{}{}", push(65), char_out())), call(1, 0),);
         let ir = compile_src_to_ir(&src);
         assert!(ir.contains("@sd_func_1"), "should define function 1");
         if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
@@ -1007,9 +1029,12 @@ mod codegen_tests {
         // CharOut → 'H'
         let src = format!(
             "{}{}{}{}{}{}",
-            push(72), push(0), store(),  // heap[0] = 72
-            push(0), load(),             // push heap[0]
-            char_out(),                  // output 'H'
+            push(72),
+            push(0),
+            store(), // heap[0] = 72
+            push(0),
+            load(),     // push heap[0]
+            char_out(), // output 'H'
         );
         let ir = compile_src_to_ir(&src);
         assert!(ir.contains("@heap"), "should access heap");
@@ -1025,11 +1050,15 @@ mod codegen_tests {
         // 5==5 → true(1) → Jump(0) → skips Push(1) CharOut → outputs 'A'
         let src = format!(
             "{}{}{}{}{}{}{}{}{}",
-            push(5), push(5), eq(),
+            push(5),
+            push(5),
+            eq(),
             jump(0),
-            push(1), char_out(),
+            push(1),
+            char_out(),
             mark(0),
-            push(65), char_out(),
+            push(65),
+            char_out(),
         );
         let ir = compile_src_to_ir(&src);
         if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {

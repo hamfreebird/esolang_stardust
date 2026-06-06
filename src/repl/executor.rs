@@ -25,11 +25,7 @@ impl Default for ReplContext {
 
 impl ReplContext {
     pub fn new() -> Self {
-        ReplContext {
-            stack: Vec::new(),
-            heap: HashMap::new(),
-            functions: HashMap::new(),
-        }
+        ReplContext { stack: Vec::new(), heap: HashMap::new(), functions: HashMap::new() }
     }
 
     pub fn clear(&mut self) {
@@ -44,10 +40,7 @@ impl ReplContext {
                 marks.insert(*n, idx);
             }
         }
-        self.functions.insert(name, FunctionDef {
-            body: Rc::new(body),
-            marks,
-        });
+        self.functions.insert(name, FunctionDef { body: Rc::new(body), marks });
     }
 
     pub fn stack_depth(&self) -> usize {
@@ -66,10 +59,7 @@ impl ReplContext {
 /// 2. 创建微型 VM，注入持久栈和堆
 /// 3. 执行
 /// 4. 归还栈和堆到上下文
-pub fn execute_repl(
-    ctx: &mut ReplContext,
-    instructions: Vec<Instruction>,
-) -> Result<(), String> {
+pub fn execute_repl(ctx: &mut ReplContext, instructions: Vec<Instruction>) -> Result<(), String> {
     if instructions.is_empty() {
         return Ok(());
     }
@@ -128,11 +118,8 @@ mod tests {
         let mut ctx = ReplContext::new();
 
         // Line 1: Push(10) Push(20)
-        execute_repl(
-            &mut ctx,
-            vec![Instruction::Push(10, meta()), Instruction::Push(20, meta())],
-        )
-        .unwrap();
+        execute_repl(&mut ctx, vec![Instruction::Push(10, meta()), Instruction::Push(20, meta())])
+            .unwrap();
         assert_eq!(ctx.stack, vec![10, 20]);
 
         // Line 2: Add → stack becomes [30]
@@ -167,16 +154,9 @@ mod tests {
     #[test]
     fn execute_with_function() {
         let mut ctx = ReplContext::new();
-        ctx.define_function(
-            1,
-            vec![Instruction::Push(65, meta()), Instruction::CharOut(meta())],
-        );
+        ctx.define_function(1, vec![Instruction::Push(65, meta()), Instruction::CharOut(meta())]);
         // Call(1, 0)
-        let insts = vec![Instruction::Call {
-            name: 1,
-            argc: 0,
-            meta: meta(),
-        }];
+        let insts = vec![Instruction::Call { name: 1, argc: 0, meta: meta() }];
         execute_repl(&mut ctx, insts).unwrap();
         // Function 1 pushes 65, CharOut pops it → empty stack
         assert!(ctx.stack.is_empty());

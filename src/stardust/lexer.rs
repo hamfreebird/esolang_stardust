@@ -11,12 +11,7 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str) -> Self {
-        Lexer {
-            chars: input.chars().peekable(),
-            line: 1,
-            column: 1,
-            byte_pos: 0,
-        }
+        Lexer { chars: input.chars().peekable(), line: 1, column: 1, byte_pos: 0 }
     }
 
     /// 消耗下一个字符并更新行列信息
@@ -44,7 +39,9 @@ impl<'a> Lexer<'a> {
         if self.peek() == Some(&'/') {
             self.advance(); // 消耗第二个 /
             while let Some(&ch) = self.peek() {
-                if ch == '\n' { break; }
+                if ch == '\n' {
+                    break;
+                }
                 self.advance();
             }
             Ok(())
@@ -61,10 +58,7 @@ impl<'a> Lexer<'a> {
             // 每次循环迭代记录当前位置——确保跳过空白行后行号正确更新
             let start_line = self.line;
             let start_col = self.column;
-            let span = SourceSpan {
-                line: start_line,
-                column: start_col,
-            };
+            let span = SourceSpan { line: start_line, column: start_col };
 
             match self.peek() {
                 Some(&' ') => {
@@ -208,13 +202,7 @@ mod tests {
 
     /// 创建一个 Token，简化参数（仅用于测试断言）
     fn tok(spaces: usize, tt: TokenType, line: usize, col: usize, bp: usize) -> Token {
-        Token {
-            spaces,
-            token_type: tt,
-            line,
-            column: col,
-            byte_pos: bp,
-        }
+        Token { spaces, token_type: tt, line, column: col, byte_pos: bp }
     }
 
     /// 从 &str 收集所有 token，忽略错误（用于正常路径测试）

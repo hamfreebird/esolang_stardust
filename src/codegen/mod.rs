@@ -139,9 +139,7 @@ pub fn compile_to_object(
             output_path.to_str().unwrap(),
         ])
         .status()
-        .map_err(|_e| CodeGenError::ToolchainMissing {
-            tool: "llc".into(),
-        })?;
+        .map_err(|_e| CodeGenError::ToolchainMissing { tool: "llc".into() })?;
 
     if !status.success() {
         return Err(CodeGenError::ToolchainError {
@@ -174,16 +172,9 @@ pub fn compile_to_exe(
     // 2. 用 clang 直接编译 .ll → 可执行文件
     let opt_flag = format!("-O{}", config.optimization);
     let status = Command::new("clang")
-        .args([
-            &opt_flag,
-            ll_path.to_str().unwrap(),
-            "-o",
-            output_path.to_str().unwrap(),
-        ])
+        .args([&opt_flag, ll_path.to_str().unwrap(), "-o", output_path.to_str().unwrap()])
         .status()
-        .map_err(|_e| CodeGenError::ToolchainMissing {
-            tool: "clang".into(),
-        })?;
+        .map_err(|_e| CodeGenError::ToolchainMissing { tool: "clang".into() })?;
 
     if !status.success() {
         return Err(CodeGenError::ToolchainError {
@@ -206,11 +197,7 @@ pub fn check_toolchain() -> ToolchainStatus {
     let has_clang = Command::new("clang").arg("--version").output().is_ok();
     let has_opt = Command::new("opt").arg("--version").output().is_ok();
 
-    ToolchainStatus {
-        llc: has_llc,
-        clang: has_clang,
-        opt: has_opt,
-    }
+    ToolchainStatus { llc: has_llc, clang: has_clang, opt: has_opt }
 }
 
 #[derive(Debug)]

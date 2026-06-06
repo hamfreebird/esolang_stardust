@@ -1,11 +1,13 @@
 use esolang_stardust::codegen::{self, CodeGenConfig};
 use esolang_stardust::extension::unwind::simple_preprocess;
 use esolang_stardust::repl;
+use esolang_stardust::stardust::config::parse_config;
 use esolang_stardust::stardust::debugger::Debugger;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
-use esolang_stardust::stardust::utils::{bump_source, compile_file_to_stardust, print_error, print_usage};
-use esolang_stardust::stardust::config::parse_config;
+use esolang_stardust::stardust::utils::{
+    bump_source, compile_file_to_stardust, print_error, print_usage,
+};
 use esolang_stardust::stardust::{StardustError, VM};
 use std::{env, fs, process};
 
@@ -164,7 +166,8 @@ fn cmd_tokens(args: &[String]) {
 
     let json = serde_json::to_string(&serde_json::json!({
         "tokens": tokens,
-    })).unwrap();
+    }))
+    .unwrap();
 
     println!("{}", json);
     process::exit(0);

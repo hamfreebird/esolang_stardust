@@ -1,5 +1,6 @@
 use crate::stardust::{
-    ErrorKind, InstrMeta, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token, TokenType,
+    ErrorKind, InstrMeta, Instruction, ParseResult, Parser, SourceSpan, StardustError, Token,
+    TokenType,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -25,10 +26,7 @@ impl Parser {
 
     fn span(&self) -> SourceSpan {
         if let Some(tok) = self.current() {
-            SourceSpan {
-                line: tok.line,
-                column: tok.column,
-            }
+            SourceSpan { line: tok.line, column: tok.column }
         } else {
             SourceSpan { line: 0, column: 0 } // EOF
         }
@@ -61,25 +59,15 @@ impl Parser {
                         marks.insert(*n, idx);
                     }
                 }
-                (name, crate::stardust::FunctionDef {
-                    body: Rc::new(body),
-                    marks,
-                })
+                (name, crate::stardust::FunctionDef { body: Rc::new(body), marks })
             })
             .collect();
 
-        Ok(ParseResult {
-            main_instructions: self.instructions,
-            main_marks: self.marks,
-            functions,
-        })
+        Ok(ParseResult { main_instructions: self.instructions, main_marks: self.marks, functions })
     }
 
     fn parse_top_level(&mut self) -> Result<(), StardustError> {
-        let token = self
-            .current()
-            .ok_or_else(|| self.error(ErrorKind::UnexpectedEof))?
-            .clone();
+        let token = self.current().ok_or_else(|| self.error(ErrorKind::UnexpectedEof))?.clone();
         match token.token_type {
             TokenType::Colon => {
                 self.parse_colon_at_top_level()?;
@@ -100,10 +88,10 @@ impl Parser {
 
         // 检查调用模式：下一个 token 是 Semicolon
         if self.is_call_pattern() {
-            let argc = self.tokens[self.pos].spaces;  // Semicolon 的 spaces = n2 = 参数个数
+            let argc = self.tokens[self.pos].spaces; // Semicolon 的 spaces = n2 = 参数个数
             let meta = Parser::meta_from_token(&self.tokens[self.pos]);
             self.instructions.push(Instruction::Call { name, argc, meta });
-            self.pos += 1;  // 跳过 Semicolon
+            self.pos += 1; // 跳过 Semicolon
             return Ok(());
         }
 
@@ -146,10 +134,7 @@ impl Parser {
     /// 在函数体内解析一条指令
     /// 注意：函数体内不允许出现函数声明，只允许普通指令或调用
     fn parse_instruction_in_function(&mut self) -> Result<Instruction, StardustError> {
-        let token = self
-            .current()
-            .ok_or_else(|| self.error(ErrorKind::UnexpectedEof))?
-            .clone();
+        let token = self.current().ok_or_else(|| self.error(ErrorKind::UnexpectedEof))?.clone();
         match token.token_type {
             TokenType::Colon => {
                 let name = token.spaces;
@@ -162,8 +147,8 @@ impl Parser {
                 if next.token_type != TokenType::Semicolon {
                     return Err(self.error(ErrorKind::ExpectedSemicolonAfterCall));
                 }
-                let argc = next.spaces;        // Semicolon 的 spaces = 参数个数
-                self.advance();                // 消耗 Semicolon
+                let argc = next.spaces; // Semicolon 的 spaces = 参数个数
+                self.advance(); // 消耗 Semicolon
                 Ok(Instruction::Call { name, argc, meta })
             }
             _ => {
@@ -244,10 +229,7 @@ impl Parser {
                 2 => return Ok(Instruction::Breakpoint(meta)),
                 _ => ErrorKind::InvalidSpacesForHash { spaces },
             },
-            TokenType::Backtick => return Ok(Instruction::Mark {
-                name: spaces,
-                meta,
-            }),
+            TokenType::Backtick => return Ok(Instruction::Mark { name: spaces, meta }),
             TokenType::Quote => return Ok(Instruction::Jump { name: spaces, meta }),
             TokenType::Tilde => return Ok(Instruction::UnconditionalJump { name: spaces, meta }),
             _ => ErrorKind::UnexpectedToken {
@@ -262,12 +244,13 @@ impl Parser {
     fn resolve_main_marks(&mut self) -> Result<(), StardustError> {
         for (idx, inst) in self.instructions.iter().enumerate() {
             if let Instruction::Mark { name, meta } = inst
-                && self.marks.insert(*name, idx).is_some() {
-                    return Err(StardustError::new(
-                        ErrorKind::DuplicateMark { name: *name },
-                        Some(meta.span.clone()),
-                    ));
-                }
+                && self.marks.insert(*name, idx).is_some()
+            {
+                return Err(StardustError::new(
+                    ErrorKind::DuplicateMark { name: *name },
+                    Some(meta.span.clone()),
+                ));
+            }
         }
         Ok(())
     }
@@ -278,14 +261,15 @@ impl Parser {
     fn validate_mark_references(&self) -> Result<(), StardustError> {
         for inst in &self.instructions {
             match inst {
-                Instruction::Jump { name, meta } |
-                Instruction::UnconditionalJump { name, meta }
-                    if !self.marks.contains_key(name) => {
-                        return Err(StardustError::new(
-                            ErrorKind::UndefinedMark { name: *name },
-                            Some(meta.span.clone()),
-                        ));
-                    }
+                Instruction::Jump { name, meta }
+                | Instruction::UnconditionalJump { name, meta }
+                    if !self.marks.contains_key(name) =>
+                {
+                    return Err(StardustError::new(
+                        ErrorKind::UndefinedMark { name: *name },
+                        Some(meta.span.clone()),
+                    ));
+                }
                 _ => {}
             }
         }
@@ -299,24 +283,26 @@ impl Parser {
             let mut func_marks: HashMap<usize, usize> = HashMap::new();
             for (idx, inst) in body.iter().enumerate() {
                 if let Instruction::Mark { name, meta } = inst
-                    && func_marks.insert(*name, idx).is_some() {
-                        return Err(StardustError::new(
-                            ErrorKind::DuplicateMark { name: *name },
-                            Some(meta.span.clone()),
-                        ));
-                    }
+                    && func_marks.insert(*name, idx).is_some()
+                {
+                    return Err(StardustError::new(
+                        ErrorKind::DuplicateMark { name: *name },
+                        Some(meta.span.clone()),
+                    ));
+                }
             }
             // 验证该函数体内的 Jump/UnconditionalJump 引用
             for inst in body {
                 match inst {
-                    Instruction::Jump { name, meta } |
-                    Instruction::UnconditionalJump { name, meta }
-                        if !func_marks.contains_key(name) => {
-                            return Err(StardustError::new(
-                                ErrorKind::UndefinedMark { name: *name },
-                                Some(meta.span.clone()),
-                            ));
-                        }
+                    Instruction::Jump { name, meta }
+                    | Instruction::UnconditionalJump { name, meta }
+                        if !func_marks.contains_key(name) =>
+                    {
+                        return Err(StardustError::new(
+                            ErrorKind::UndefinedMark { name: *name },
+                            Some(meta.span.clone()),
+                        ));
+                    }
                     _ => {}
                 }
             }
@@ -338,7 +324,9 @@ mod tests {
     use super::*;
     use crate::stardust::TokenType;
 
-    fn meta() -> InstrMeta { InstrMeta::default() }
+    fn meta() -> InstrMeta {
+        InstrMeta::default()
+    }
 
     fn tok(spaces: usize, tt: TokenType) -> Token {
         Token { spaces, token_type: tt, line: 1, column: 1, byte_pos: 0 }
@@ -348,15 +336,33 @@ mod tests {
         Token { spaces, token_type: tt, line, column: col, byte_pos: 0 }
     }
 
-    fn colon(spaces: usize) -> Token { tok(spaces, TokenType::Colon) }
-    fn semicolon(spaces: usize) -> Token { tok(spaces, TokenType::Semicolon) }
-    fn plus(spaces: usize) -> Token { tok(spaces, TokenType::Plus) }
-    fn star(spaces: usize) -> Token { tok(spaces, TokenType::Star) }
-    fn dot(spaces: usize) -> Token { tok(spaces, TokenType::Dot) }
-    fn comma(spaces: usize) -> Token { tok(spaces, TokenType::Comma) }
-    fn backtick(spaces: usize) -> Token { tok(spaces, TokenType::Backtick) }
-    fn quote(spaces: usize) -> Token { tok(spaces, TokenType::Quote) }
-    fn tilde(spaces: usize) -> Token { tok(spaces, TokenType::Tilde) }
+    fn colon(spaces: usize) -> Token {
+        tok(spaces, TokenType::Colon)
+    }
+    fn semicolon(spaces: usize) -> Token {
+        tok(spaces, TokenType::Semicolon)
+    }
+    fn plus(spaces: usize) -> Token {
+        tok(spaces, TokenType::Plus)
+    }
+    fn star(spaces: usize) -> Token {
+        tok(spaces, TokenType::Star)
+    }
+    fn dot(spaces: usize) -> Token {
+        tok(spaces, TokenType::Dot)
+    }
+    fn comma(spaces: usize) -> Token {
+        tok(spaces, TokenType::Comma)
+    }
+    fn backtick(spaces: usize) -> Token {
+        tok(spaces, TokenType::Backtick)
+    }
+    fn quote(spaces: usize) -> Token {
+        tok(spaces, TokenType::Quote)
+    }
+    fn tilde(spaces: usize) -> Token {
+        tok(spaces, TokenType::Tilde)
+    }
 
     // ═══════════ 1. Push / 栈操作 (符号 +) ═══════════
 
@@ -537,7 +543,10 @@ mod tests {
     fn unconditional_jump() {
         let result = parse_program(vec![backtick(7), tilde(7)]).unwrap();
         assert_eq!(result.main_instructions[0], Instruction::Mark { name: 7, meta: meta() });
-        assert_eq!(result.main_instructions[1], Instruction::UnconditionalJump { name: 7, meta: meta() });
+        assert_eq!(
+            result.main_instructions[1],
+            Instruction::UnconditionalJump { name: 7, meta: meta() }
+        );
     }
 
     #[test]
@@ -577,9 +586,9 @@ mod tests {
         // (1): Push(0) CharOut (1):
         let tokens = vec![
             colon(1),
-            plus(5),    // Push(0)
-            comma(0),   // CharOut
-            colon(1),   // 结束标志
+            plus(5),  // Push(0)
+            comma(0), // CharOut
+            colon(1), // 结束标志
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
@@ -611,10 +620,7 @@ mod tests {
 
     #[test]
     fn duplicate_function_error() {
-        let tokens = vec![
-            colon(1), plus(5), colon(1),
-            colon(1), plus(6), colon(1),
-        ];
+        let tokens = vec![colon(1), plus(5), colon(1), colon(1), plus(6), colon(1)];
         let result = parse_program(tokens);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind, ErrorKind::DuplicateFunction { name: 1 });
@@ -639,7 +645,8 @@ mod tests {
         // VM 通过 CallFrame 栈完全支持嵌套调用
         let tokens = vec![
             colon(1),
-            colon(2), semicolon(3),  // Call(name=2, argc=3) — 函数体内调用
+            colon(2),
+            semicolon(3), // Call(name=2, argc=3) — 函数体内调用
             colon(1),
         ];
         let result = parse_program(tokens).unwrap();
@@ -654,37 +661,44 @@ mod tests {
     #[test]
     fn function_call_at_top_level() {
         // (3): (2);  →  Call(name=3, argc=2)
-        let tokens = vec![
-            colon(3),
-            semicolon(2),
-        ];
+        let tokens = vec![colon(3), semicolon(2)];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.main_instructions.len(), 1);
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 3, argc: 2, meta: meta() });
+        assert_eq!(
+            result.main_instructions[0],
+            Instruction::Call { name: 3, argc: 2, meta: meta() }
+        );
     }
 
     #[test]
     fn function_call_with_zero_args() {
         // (1): (0);
-        let tokens = vec![
-            colon(1),
-            semicolon(0),
-        ];
+        let tokens = vec![colon(1), semicolon(0)];
         let result = parse_program(tokens).unwrap();
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0, meta: meta() });
+        assert_eq!(
+            result.main_instructions[0],
+            Instruction::Call { name: 1, argc: 0, meta: meta() }
+        );
     }
 
     #[test]
     fn function_declaration_then_call() {
         // 声明函数1: Push(0) CharOut ; 然后调用它: (1): (0);
         let tokens = vec![
-            colon(1), plus(5), comma(0), colon(1),  // 函数声明
-            colon(1), semicolon(0),                  // 函数调用
+            colon(1),
+            plus(5),
+            comma(0),
+            colon(1), // 函数声明
+            colon(1),
+            semicolon(0), // 函数调用
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.functions.len(), 1);
         assert_eq!(result.main_instructions.len(), 1);
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 1, argc: 0, meta: meta() });
+        assert_eq!(
+            result.main_instructions[0],
+            Instruction::Call { name: 1, argc: 0, meta: meta() }
+        );
     }
 
     // ═══════════ 8. 混合指令 ═══════════
@@ -692,10 +706,10 @@ mod tests {
     #[test]
     fn multiple_instructions_sequence() {
         let tokens = vec![
-            plus(5),     // Push(0)
-            plus(5),     // Push(0)
-            star(0),     // Add
-            dot(0),      // NumOut
+            plus(5), // Push(0)
+            plus(5), // Push(0)
+            star(0), // Add
+            dot(0),  // NumOut
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.main_instructions.len(), 4);
@@ -705,8 +719,8 @@ mod tests {
     fn hello_world_style_sequence() {
         // Push(72) CharOut → 'H'
         let tokens = vec![
-            plus(77),   // Push(72)
-            comma(0),   // CharOut
+            plus(77), // Push(72)
+            comma(0), // CharOut
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.main_instructions[0], Instruction::Push(72, meta()));
@@ -716,10 +730,10 @@ mod tests {
     #[test]
     fn mark_then_jump_then_unconditional_jump() {
         let tokens = vec![
-            backtick(0),  // Mark(0)
-            plus(5),      // Push(0)
-            quote(0),     // Jump(0) — 条件跳转
-            tilde(0),     // UncondJump(0)
+            backtick(0), // Mark(0)
+            plus(5),     // Push(0)
+            quote(0),    // Jump(0) — 条件跳转
+            tilde(0),    // UncondJump(0)
         ];
         let result = parse_program(tokens).unwrap();
         assert_eq!(result.main_instructions.len(), 4);
@@ -744,7 +758,10 @@ mod tests {
         // (0): (3);  调用 name=0, argc=3
         let tokens = vec![colon(0), semicolon(3)];
         let result = parse_program(tokens).unwrap();
-        assert_eq!(result.main_instructions[0], Instruction::Call { name: 0, argc: 3, meta: meta() });
+        assert_eq!(
+            result.main_instructions[0],
+            Instruction::Call { name: 0, argc: 3, meta: meta() }
+        );
     }
 
     // ═══════════ 11. Mark 中的 SourceSpan ═══════════

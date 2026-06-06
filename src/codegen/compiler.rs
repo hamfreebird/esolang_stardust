@@ -9,9 +9,9 @@
 use crate::stardust::{Instruction, ParseResult};
 use std::collections::HashMap;
 
+use super::CodeGenConfig;
 use super::intrinsics::{EXTERNAL_DECLS, INTRINSICS_IR};
 use super::optimizer;
-use super::CodeGenConfig;
 
 // ── 编译期栈条目 ──────────────────────────────────────────────
 
@@ -100,14 +100,8 @@ impl<'a> FuncCompiler<'a> {
         let ptr = format!("%ptr_{l}");
         let val = format!("%val_{l}");
 
-        self.emitln(&format!(
-            "  %sp_pre_{l} = load i64, i64* @sp",
-            l = l
-        ));
-        self.emitln(&format!(
-            "  {sp} = sub i64 %sp_pre_{l}, 1",
-            sp = sp_dec
-        ));
+        self.emitln(&format!("  %sp_pre_{l} = load i64, i64* @sp", l = l));
+        self.emitln(&format!("  {sp} = sub i64 %sp_pre_{l}, 1", sp = sp_dec));
         self.emitln(&format!("  store i64 {sp}, i64* @sp", sp = sp_dec));
         self.emitln(&format!(
             "  {ptr} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 {sp}",
@@ -115,11 +109,7 @@ impl<'a> FuncCompiler<'a> {
             sp = sp_dec,
             SZ = self.config.stack_size
         ));
-        self.emitln(&format!(
-            "  {val} = load i64, i64* {ptr}",
-            val = val,
-            ptr = ptr
-        ));
+        self.emitln(&format!("  {val} = load i64, i64* {ptr}", val = val, ptr = ptr));
         self.tracked_depth = self.tracked_depth.saturating_sub(1);
         StackEntry::Reg(val)
     }
@@ -150,20 +140,14 @@ impl<'a> FuncCompiler<'a> {
         let stack_size = self.config.stack_size;
         let l = self.next_label();
 
-        self.emitln(&format!(
-            "  ; flush {} stack entries to memory",
-            count
-        ));
+        self.emitln(&format!("  ; flush {} stack entries to memory", count));
         self.emitln(&format!("  %sp_flush_{l} = load i64, i64* @sp"));
 
         for i in 0..count {
             let val_str = &entries[i];
             let ptr = format!("%flush_ptr_{}_{}", l, i);
-            let sp_name = if i == 0 {
-                format!("%sp_flush_{l}")
-            } else {
-                format!("%sp_flush_{}_{}", l, i)
-            };
+            let sp_name =
+                if i == 0 { format!("%sp_flush_{l}") } else { format!("%sp_flush_{}_{}", l, i) };
             let next_sp = if i + 1 < count {
                 format!("%sp_flush_{}_{}", l, i + 1)
             } else {
@@ -176,25 +160,15 @@ impl<'a> FuncCompiler<'a> {
                 sp = sp_name,
                 SZ = stack_size
             ));
-            self.emitln(&format!(
-                "  store i64 {val}, i64* {ptr}",
-                val = val_str,
-                ptr = ptr
-            ));
+            self.emitln(&format!("  store i64 {val}, i64* {ptr}", val = val_str, ptr = ptr));
 
             if i + 1 < count {
-                self.emitln(&format!(
-                    "  {next} = add i64 {sp}, 1",
-                    next = next_sp,
-                    sp = sp_name
-                ));
+                self.emitln(&format!("  {next} = add i64 {sp}, 1", next = next_sp, sp = sp_name));
             }
         }
 
         if count == 1 {
-            self.emitln(&format!(
-                "  %sp_flush_done_{l} = add i64 %sp_flush_{l}, 1"
-            ));
+            self.emitln(&format!("  %sp_flush_done_{l} = add i64 %sp_flush_{l}, 1"));
         } else {
             self.emitln(&format!(
                 "  %sp_flush_done_{l} = add i64 %sp_flush_{l}_{last}, 1",
@@ -202,9 +176,7 @@ impl<'a> FuncCompiler<'a> {
                 last = count - 1
             ));
         }
-        self.emitln(&format!(
-            "  store i64 %sp_flush_done_{l}, i64* @sp"
-        ));
+        self.emitln(&format!("  store i64 %sp_flush_done_{l}, i64* @sp"));
 
         self.compile_stack.clear();
     }
@@ -362,24 +334,13 @@ impl<'a> FuncCompiler<'a> {
         let a_str = a.to_llvm();
         let b_str = b.to_llvm();
 
-        self.emitln(&format!(
-            "  %div_zero_{l} = icmp eq i64 {b}, 0",
-            l = l,
-            b = b_str
-        ));
-        self.emitln(&format!(
-            "  br i1 %div_zero_{l}, label %div_err_{l}, label %div_ok_{l}"
-        ));
+        self.emitln(&format!("  %div_zero_{l} = icmp eq i64 {b}, 0", l = l, b = b_str));
+        self.emitln(&format!("  br i1 %div_zero_{l}, label %div_err_{l}, label %div_ok_{l}"));
         self.emitln(&format!("div_err_{l}:"));
         self.emitln(&"  call void @runtime_divzero()".to_string());
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("div_ok_{l}:"));
-        self.emitln(&format!(
-            "  {r} = sdiv i64 {a}, {b}",
-            r = result,
-            a = a_str,
-            b = b_str
-        ));
+        self.emitln(&format!("  {r} = sdiv i64 {a}, {b}", r = result, a = a_str, b = b_str));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -394,24 +355,13 @@ impl<'a> FuncCompiler<'a> {
         let a_str = a.to_llvm();
         let b_str = b.to_llvm();
 
-        self.emitln(&format!(
-            "  %mod_zero_{l} = icmp eq i64 {b}, 0",
-            l = l,
-            b = b_str
-        ));
-        self.emitln(&format!(
-            "  br i1 %mod_zero_{l}, label %mod_err_{l}, label %mod_ok_{l}"
-        ));
+        self.emitln(&format!("  %mod_zero_{l} = icmp eq i64 {b}, 0", l = l, b = b_str));
+        self.emitln(&format!("  br i1 %mod_zero_{l}, label %mod_err_{l}, label %mod_ok_{l}"));
         self.emitln(&format!("mod_err_{l}:"));
         self.emitln(&"  call void @runtime_modzero()".to_string());
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("mod_ok_{l}:"));
-        self.emitln(&format!(
-            "  {r} = srem i64 {a}, {b}",
-            r = result,
-            a = a_str,
-            b = b_str
-        ));
+        self.emitln(&format!("  {r} = srem i64 {a}, {b}", r = result, a = a_str, b = b_str));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -428,46 +378,26 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("rev_prep_{l}:"));
 
         // 获取帧基址和栈指针
-        self.emitln(&format!(
-            "  %sp_rev_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %fbd_rev_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %fbd_rev_d_{l} = sub i32 %fbd_rev_{l}, 1"
-        ));
+        self.emitln(&format!("  %sp_rev_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %fbd_rev_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %fbd_rev_d_{l} = sub i32 %fbd_rev_{l}, 1"));
         self.emitln(&format!(
             "  %fb_gep_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %fbd_rev_d_{l}",
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  %fb_{l} = load i64, i64* %fb_gep_{l}"
-        ));
-        self.emitln(&format!(
-            "  %rev_len_{l} = sub i64 %sp_rev_{l}, %fb_{l}"
-        ));
+        self.emitln(&format!("  %fb_{l} = load i64, i64* %fb_gep_{l}"));
+        self.emitln(&format!("  %rev_len_{l} = sub i64 %sp_rev_{l}, %fb_{l}"));
 
         // 如果 len <= 1，不需要做任何事
-        self.emitln(&format!(
-            "  %rev_trivial_{l} = icmp sle i64 %rev_len_{l}, 1"
-        ));
-        self.emitln(&format!(
-            "  br i1 %rev_trivial_{l}, label %rev_done_{l}, label %rev_do_{l}"
-        ));
+        self.emitln(&format!("  %rev_trivial_{l} = icmp sle i64 %rev_len_{l}, 1"));
+        self.emitln(&format!("  br i1 %rev_trivial_{l}, label %rev_done_{l}, label %rev_do_{l}"));
         self.emitln(&format!("rev_do_{l}:"));
 
         // 分配临时缓冲区
-        self.emitln(&format!(
-            "  %rev_bytes_{l} = mul i64 %rev_len_{l}, 8"
-        ));
-        self.emitln(&format!(
-            "  %rev_tmp_{l} = call i8* @malloc(i64 %rev_bytes_{l})"
-        ));
-        self.emitln(&format!(
-            "  %rev_tmp_i64_{l} = bitcast i8* %rev_tmp_{l} to i64*"
-        ));
+        self.emitln(&format!("  %rev_bytes_{l} = mul i64 %rev_len_{l}, 8"));
+        self.emitln(&format!("  %rev_tmp_{l} = call i8* @malloc(i64 %rev_bytes_{l})"));
+        self.emitln(&format!("  %rev_tmp_i64_{l} = bitcast i8* %rev_tmp_{l} to i64*"));
 
         // 复制到 tmp（原地顺序）
         self.emitln(&format!(
@@ -485,46 +415,30 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!(
             "  %rev_j_{l} = phi i64 [ 0, %rev_do_{l} ], [ %rev_j_next_{l}, %rev_loop_body_{l} ]"
         ));
-        self.emitln(&format!(
-            "  %rev_loop_done_{l} = icmp eq i64 %rev_j_{l}, %rev_len_{l}"
-        ));
+        self.emitln(&format!("  %rev_loop_done_{l} = icmp eq i64 %rev_j_{l}, %rev_len_{l}"));
         self.emitln(&format!(
             "  br i1 %rev_loop_done_{l}, label %rev_free_{l}, label %rev_loop_body_{l}"
         ));
         self.emitln(&format!("rev_loop_body_{l}:"));
         // tmp_src_idx = len - 1 - j
-        self.emitln(&format!(
-            "  %rev_tmp_src_idx_{l} = sub i64 %rev_len_{l}, 1"
-        ));
-        self.emitln(&format!(
-            "  %rev_tmp_src_idx_{l} = sub i64 %rev_tmp_src_idx_{l}, %rev_j_{l}"
-        ));
+        self.emitln(&format!("  %rev_tmp_src_idx_{l} = sub i64 %rev_len_{l}, 1"));
+        self.emitln(&format!("  %rev_tmp_src_idx_{l} = sub i64 %rev_tmp_src_idx_{l}, %rev_j_{l}"));
         self.emitln(&format!(
             "  %rev_tmp_src_{l} = getelementptr i64, i64* %rev_tmp_i64_{l}, i64 %rev_tmp_src_idx_{l}"
         ));
-        self.emitln(&format!(
-            "  %rev_val_{l} = load i64, i64* %rev_tmp_src_{l}"
-        ));
+        self.emitln(&format!("  %rev_val_{l} = load i64, i64* %rev_tmp_src_{l}"));
         // stack_dst_idx = fb + j
-        self.emitln(&format!(
-            "  %rev_dst_idx_{l} = add i64 %fb_{l}, %rev_j_{l}"
-        ));
+        self.emitln(&format!("  %rev_dst_idx_{l} = add i64 %fb_{l}, %rev_j_{l}"));
         self.emitln(&format!(
             "  %rev_dst_{l} = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %rev_dst_idx_{l}",
             SSZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  store i64 %rev_val_{l}, i64* %rev_dst_{l}"
-        ));
-        self.emitln(&format!(
-            "  %rev_j_next_{l} = add i64 %rev_j_{l}, 1"
-        ));
+        self.emitln(&format!("  store i64 %rev_val_{l}, i64* %rev_dst_{l}"));
+        self.emitln(&format!("  %rev_j_next_{l} = add i64 %rev_j_{l}, 1"));
         self.emitln(&format!("  br label %rev_loop_{l}"));
         self.emitln(&format!("rev_free_{l}:"));
-        self.emitln(&format!(
-            "  call void @free(i8* %rev_tmp_{l})"
-        ));
+        self.emitln(&format!("  call void @free(i8* %rev_tmp_{l})"));
         self.emitln(&format!("  br label %rev_done_{l}"));
         self.emitln(&format!("rev_done_{l}:"));
     }
@@ -537,37 +451,16 @@ impl<'a> FuncCompiler<'a> {
         let val_str = val.to_llvm();
 
         // Bounds check: 0 <= val <= 127
-        self.emitln(&format!(
-            "  %ch_ok_low_{l} = icmp sge i64 {v}, 0",
-            v = val_str,
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %ch_ok_high_{l} = icmp sle i64 {v}, 127",
-            v = val_str,
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %ch_ok_{l} = and i1 %ch_ok_low_{l}, %ch_ok_high_{l}"
-        ));
-        self.emitln(&format!(
-            "  br i1 %ch_ok_{l}, label %ch_put_{l}, label %ch_bad_{l}"
-        ));
+        self.emitln(&format!("  %ch_ok_low_{l} = icmp sge i64 {v}, 0", v = val_str, l = l));
+        self.emitln(&format!("  %ch_ok_high_{l} = icmp sle i64 {v}, 127", v = val_str, l = l));
+        self.emitln(&format!("  %ch_ok_{l} = and i1 %ch_ok_low_{l}, %ch_ok_high_{l}"));
+        self.emitln(&format!("  br i1 %ch_ok_{l}, label %ch_put_{l}, label %ch_bad_{l}"));
         self.emitln(&format!("ch_bad_{l}:"));
-        self.emitln(&format!(
-            "  call void @runtime_bad_ascii(i64 {v})",
-            v = val_str
-        ));
+        self.emitln(&format!("  call void @runtime_bad_ascii(i64 {v})", v = val_str));
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("ch_put_{l}:"));
-        self.emitln(&format!(
-            "  %ch_trunc_{l} = trunc i64 {v} to i32",
-            v = val_str
-        ));
-        self.emitln(&format!(
-            "  %ch_call_{l} = call i32 @putchar(i32 %ch_trunc_{l})",
-            l = l
-        ));
+        self.emitln(&format!("  %ch_trunc_{l} = trunc i64 {v} to i32", v = val_str));
+        self.emitln(&format!("  %ch_call_{l} = call i32 @putchar(i32 %ch_trunc_{l})", l = l));
     }
 
     // ── CharIn ─────────────────────────────────────────────
@@ -579,14 +472,8 @@ impl<'a> FuncCompiler<'a> {
         }
         let l = self.next_label();
         let result = format!("%charin_{l}");
-        self.emitln(&format!(
-            "  {r} = call i32 @getchar()",
-            r = result
-        ));
-        self.emitln(&format!(
-            "  %charin_ext_{l} = sext i32 {r} to i64",
-            r = result
-        ));
+        self.emitln(&format!("  {r} = call i32 @getchar()", r = result));
+        self.emitln(&format!("  %charin_ext_{l} = sext i32 {r} to i64", r = result));
         self.push_ssa(StackEntry::Reg(format!("%charin_ext_{l}")));
     }
 
@@ -610,16 +497,12 @@ impl<'a> FuncCompiler<'a> {
         }
         let l = self.next_label();
         // Alloca space for input
-        self.emitln(&format!(
-            "  %nin_ptr_{l} = alloca i64"
-        ));
+        self.emitln(&format!("  %nin_ptr_{l} = alloca i64"));
         self.emitln(&format!(
             "  %nin_call_{l} = call i32 (i8*, ...) @scanf(i8* getelementptr ([4 x i8], [4 x i8]* @fmt_numin, i32 0, i32 0), i64* %nin_ptr_{l})",
             l = l
         ));
-        self.emitln(&format!(
-            "  %nin_val_{l} = load i64, i64* %nin_ptr_{l}"
-        ));
+        self.emitln(&format!("  %nin_val_{l} = load i64, i64* %nin_ptr_{l}"));
         self.push_ssa(StackEntry::Reg(format!("%nin_val_{l}")));
     }
 
@@ -647,11 +530,7 @@ impl<'a> FuncCompiler<'a> {
         let target = Self::mark_label(name);
         let fallthrough = Self::bb_label(l);
 
-        self.emitln(&format!(
-            "  %jmp_cond_{l} = icmp ne i64 {c}, 0",
-            c = cond_str,
-            l = l
-        ));
+        self.emitln(&format!("  %jmp_cond_{l} = icmp ne i64 {c}, 0", c = cond_str, l = l));
         self.emitln(&format!(
             "  br i1 %jmp_cond_{l}, label %{t}, label %{f}",
             t = target,
@@ -684,27 +563,13 @@ impl<'a> FuncCompiler<'a> {
         self.flush();
 
         // Save frame base
-        self.emitln(&format!(
-            "  ; Call function {}, argc={}",
-            name, argc
-        ));
-        self.emitln(&format!(
-            "  %fbd_call_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %sp_call_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %fb_call_{l} = sub i64 %sp_call_{l}, {argc}",
-            argc = argc,
-            l = l
-        ));
+        self.emitln(&format!("  ; Call function {}, argc={}", name, argc));
+        self.emitln(&format!("  %fbd_call_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %sp_call_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %fb_call_{l} = sub i64 %sp_call_{l}, {argc}", argc = argc, l = l));
 
         // Check arguments
-        self.emitln(&format!(
-            "  %arg_ok_{l} = icmp sge i64 %fb_call_{l}, 0",
-            l = l
-        ));
+        self.emitln(&format!("  %arg_ok_{l} = icmp sge i64 %fb_call_{l}, 0", l = l));
         self.emitln(&format!(
             "  br i1 %arg_ok_{l}, label %call_args_ok_{l}, label %call_noargs_{l}"
         ));
@@ -719,14 +584,10 @@ impl<'a> FuncCompiler<'a> {
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  store i64 %fb_call_{l}, i64* %fb_slot_{l}"
-        ));
+        self.emitln(&format!("  store i64 %fb_call_{l}, i64* %fb_slot_{l}"));
 
         // Increment frame depth with overflow check
-        self.emitln(&format!(
-            "  %fbd_next_{l} = add i32 %fbd_call_{l}, 1"
-        ));
+        self.emitln(&format!("  %fbd_next_{l} = add i32 %fbd_call_{l}, 1"));
         self.emitln(&format!(
             "  %depth_ok_{l} = icmp slt i32 %fbd_next_{l}, {MD}",
             MD = self.config.max_call_depth,
@@ -739,20 +600,13 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&"  call void @runtime_call_depth()".to_string());
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("call_ok_{l}:"));
-        self.emitln(&format!(
-            "  store i32 %fbd_next_{l}, i32* @frame_depth"
-        ));
+        self.emitln(&format!("  store i32 %fbd_next_{l}, i32* @frame_depth"));
 
         // Call the function
-        self.emitln(&format!(
-            "  call void @sd_func_{name}()",
-            name = name
-        ));
+        self.emitln(&format!("  call void @sd_func_{name}()", name = name));
 
         // Restore frame depth
-        self.emitln(&format!(
-            "  store i32 %fbd_call_{l}, i32* @frame_depth"
-        ));
+        self.emitln(&format!("  store i32 %fbd_call_{l}, i32* @frame_depth"));
 
         self.at_bb_start = true;
     }
@@ -782,11 +636,7 @@ impl<'a> FuncCompiler<'a> {
             b = b.to_llvm(),
             l = l
         ));
-        self.emitln(&format!(
-            "  {r} = zext i1 %cmp_bool_{l} to i64",
-            r = result,
-            l = l
-        ));
+        self.emitln(&format!("  {r} = zext i1 %cmp_bool_{l} to i64", r = result, l = l));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -799,23 +649,10 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         let result = format!("%and_{l}");
 
-        self.emitln(&format!(
-            "  %and_a_{l} = icmp ne i64 {a}, 0",
-            a = a.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %and_b_{l} = icmp ne i64 {b}, 0",
-            b = b.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %and_bool_{l} = and i1 %and_a_{l}, %and_b_{l}"
-        ));
-        self.emitln(&format!(
-            "  {r} = zext i1 %and_bool_{l} to i64",
-            r = result
-        ));
+        self.emitln(&format!("  %and_a_{l} = icmp ne i64 {a}, 0", a = a.to_llvm(), l = l));
+        self.emitln(&format!("  %and_b_{l} = icmp ne i64 {b}, 0", b = b.to_llvm(), l = l));
+        self.emitln(&format!("  %and_bool_{l} = and i1 %and_a_{l}, %and_b_{l}"));
+        self.emitln(&format!("  {r} = zext i1 %and_bool_{l} to i64", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -826,23 +663,10 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         let result = format!("%or_{l}");
 
-        self.emitln(&format!(
-            "  %or_a_{l} = icmp ne i64 {a}, 0",
-            a = a.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %or_b_{l} = icmp ne i64 {b}, 0",
-            b = b.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %or_bool_{l} = or i1 %or_a_{l}, %or_b_{l}"
-        ));
-        self.emitln(&format!(
-            "  {r} = zext i1 %or_bool_{l} to i64",
-            r = result
-        ));
+        self.emitln(&format!("  %or_a_{l} = icmp ne i64 {a}, 0", a = a.to_llvm(), l = l));
+        self.emitln(&format!("  %or_b_{l} = icmp ne i64 {b}, 0", b = b.to_llvm(), l = l));
+        self.emitln(&format!("  %or_bool_{l} = or i1 %or_a_{l}, %or_b_{l}"));
+        self.emitln(&format!("  {r} = zext i1 %or_bool_{l} to i64", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -852,15 +676,8 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         let result = format!("%not_{l}");
 
-        self.emitln(&format!(
-            "  %not_a_{l} = icmp eq i64 {a}, 0",
-            a = a.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  {r} = zext i1 %not_a_{l} to i64",
-            r = result
-        ));
+        self.emitln(&format!("  %not_a_{l} = icmp eq i64 {a}, 0", a = a.to_llvm(), l = l));
+        self.emitln(&format!("  {r} = zext i1 %not_a_{l} to i64", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -871,23 +688,10 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         let result = format!("%xor_{l}");
 
-        self.emitln(&format!(
-            "  %xor_a_{l} = icmp ne i64 {a}, 0",
-            a = a.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %xor_b_{l} = icmp ne i64 {b}, 0",
-            b = b.to_llvm(),
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %xor_bool_{l} = xor i1 %xor_a_{l}, %xor_b_{l}"
-        ));
-        self.emitln(&format!(
-            "  {r} = zext i1 %xor_bool_{l} to i64",
-            r = result
-        ));
+        self.emitln(&format!("  %xor_a_{l} = icmp ne i64 {a}, 0", a = a.to_llvm(), l = l));
+        self.emitln(&format!("  %xor_b_{l} = icmp ne i64 {b}, 0", b = b.to_llvm(), l = l));
+        self.emitln(&format!("  %xor_bool_{l} = xor i1 %xor_a_{l}, %xor_b_{l}"));
+        self.emitln(&format!("  {r} = zext i1 %xor_bool_{l} to i64", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -909,14 +713,9 @@ impl<'a> FuncCompiler<'a> {
             HS = self.config.heap_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  br i1 %st_ok_{l}, label %st_do_{l}, label %st_err_{l}"
-        ));
+        self.emitln(&format!("  br i1 %st_ok_{l}, label %st_do_{l}, label %st_err_{l}"));
         self.emitln(&format!("st_err_{l}:"));
-        self.emitln(&format!(
-            "  call void @runtime_heap_oob(i64 {a})",
-            a = addr_str
-        ));
+        self.emitln(&format!("  call void @runtime_heap_oob(i64 {a})", a = addr_str));
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("st_do_{l}:"));
         self.emitln(&format!(
@@ -925,10 +724,7 @@ impl<'a> FuncCompiler<'a> {
             a = addr_str,
             l = l
         ));
-        self.emitln(&format!(
-            "  store i64 {v}, i64* %st_ptr_{l}",
-            v = val_str
-        ));
+        self.emitln(&format!("  store i64 {v}, i64* %st_ptr_{l}", v = val_str));
     }
 
     fn compile_load(&mut self) {
@@ -944,14 +740,9 @@ impl<'a> FuncCompiler<'a> {
             HS = self.config.heap_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  br i1 %ld_ok_{l}, label %ld_do_{l}, label %ld_err_{l}"
-        ));
+        self.emitln(&format!("  br i1 %ld_ok_{l}, label %ld_do_{l}, label %ld_err_{l}"));
         self.emitln(&format!("ld_err_{l}:"));
-        self.emitln(&format!(
-            "  call void @runtime_heap_oob(i64 {a})",
-            a = addr_str
-        ));
+        self.emitln(&format!("  call void @runtime_heap_oob(i64 {a})", a = addr_str));
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("ld_do_{l}:"));
         self.emitln(&format!(
@@ -960,10 +751,7 @@ impl<'a> FuncCompiler<'a> {
             a = addr_str,
             l = l
         ));
-        self.emitln(&format!(
-            "  {r} = load i64, i64* %ld_ptr_{l}",
-            r = result
-        ));
+        self.emitln(&format!("  {r} = load i64, i64* %ld_ptr_{l}", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -977,27 +765,16 @@ impl<'a> FuncCompiler<'a> {
         // Depth = current sp - frame_base
         self.flush(); // Ensure sp is up to date
 
-        self.emitln(&format!(
-            "  %sp_d_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %fbd_d_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %fbd_d_d_{l} = sub i32 %fbd_d_{l}, 1"
-        ));
+        self.emitln(&format!("  %sp_d_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %fbd_d_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %fbd_d_d_{l} = sub i32 %fbd_d_{l}, 1"));
         self.emitln(&format!(
             "  %fb_gep_d_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %fbd_d_d_{l}",
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  %fb_d_{l} = load i64, i64* %fb_gep_d_{l}"
-        ));
-        self.emitln(&format!(
-            "  {r} = sub i64 %sp_d_{l}, %fb_d_{l}",
-            r = result
-        ));
+        self.emitln(&format!("  %fb_d_{l} = load i64, i64* %fb_gep_d_{l}"));
+        self.emitln(&format!("  {r} = sub i64 %sp_d_{l}, %fb_d_{l}", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -1009,30 +786,18 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
 
         // Shift left: stack[fb] moves to stack[sp-1], everything else shifts down
-        self.emitln(&format!(
-            "  %sp_sl_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %fbd_sl_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %fbd_sl_d_{l} = sub i32 %fbd_sl_{l}, 1"
-        ));
+        self.emitln(&format!("  %sp_sl_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %fbd_sl_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %fbd_sl_d_{l} = sub i32 %fbd_sl_{l}, 1"));
         self.emitln(&format!(
             "  %fb_gep_sl_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %fbd_sl_d_{l}",
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  %fb_sl_{l} = load i64, i64* %fb_gep_sl_{l}"
-        ));
+        self.emitln(&format!("  %fb_sl_{l} = load i64, i64* %fb_gep_sl_{l}"));
         // stack_underflow check
-        self.emitln(&format!(
-            "  %sl_empty_{l} = icmp eq i64 %sp_sl_{l}, %fb_sl_{l}"
-        ));
-        self.emitln(&format!(
-            "  br i1 %sl_empty_{l}, label %sl_err_{l}, label %sl_ok_{l}"
-        ));
+        self.emitln(&format!("  %sl_empty_{l} = icmp eq i64 %sp_sl_{l}, %fb_sl_{l}"));
+        self.emitln(&format!("  br i1 %sl_empty_{l}, label %sl_err_{l}, label %sl_ok_{l}"));
         self.emitln(&format!("sl_err_{l}:"));
         self.emitln(&"  call void @runtime_stack_underflow()".to_string());
         self.emitln(&"  unreachable".to_string());
@@ -1043,27 +808,17 @@ impl<'a> FuncCompiler<'a> {
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sl_first_{l} = load i64, i64* %sl_first_ptr_{l}"
-        ));
+        self.emitln(&format!("  %sl_first_{l} = load i64, i64* %sl_first_ptr_{l}"));
         // memmove(stack[fb], stack[fb+1], (sp - fb - 1)*8)
         self.emitln(&format!(
             "  %sl_src_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %fb_sl_{l}",
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sl_src_1_{l} = getelementptr i64, i64* %sl_src_{l}, i64 1"
-        ));
-        self.emitln(&format!(
-            "  %sl_count_{l} = sub i64 %sp_sl_{l}, %fb_sl_{l}"
-        ));
-        self.emitln(&format!(
-            "  %sl_count_dec_{l} = sub i64 %sl_count_{l}, 1"
-        ));
-        self.emitln(&format!(
-            "  %sl_bytes_{l} = mul i64 %sl_count_dec_{l}, 8"
-        ));
+        self.emitln(&format!("  %sl_src_1_{l} = getelementptr i64, i64* %sl_src_{l}, i64 1"));
+        self.emitln(&format!("  %sl_count_{l} = sub i64 %sp_sl_{l}, %fb_sl_{l}"));
+        self.emitln(&format!("  %sl_count_dec_{l} = sub i64 %sl_count_{l}, 1"));
+        self.emitln(&format!("  %sl_bytes_{l} = mul i64 %sl_count_dec_{l}, 8"));
         self.emitln(&format!(
             "  call void @llvm.memmove.p0.p0.i64(i64* %sl_src_{l}, i64* %sl_src_1_{l}, i64 %sl_bytes_{l}, i1 false)",
             l = l
@@ -1074,12 +829,8 @@ impl<'a> FuncCompiler<'a> {
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sl_dst_dec_{l} = getelementptr i64, i64* %sl_dst_{l}, i64 -1"
-        ));
-        self.emitln(&format!(
-            "  store i64 %sl_first_{l}, i64* %sl_dst_dec_{l}"
-        ));
+        self.emitln(&format!("  %sl_dst_dec_{l} = getelementptr i64, i64* %sl_dst_{l}, i64 -1"));
+        self.emitln(&format!("  store i64 %sl_first_{l}, i64* %sl_dst_dec_{l}"));
     }
 
     // ── ShiftR ─────────────────────────────────────────────
@@ -1088,53 +839,33 @@ impl<'a> FuncCompiler<'a> {
         self.flush();
         let l = self.next_label();
 
-        self.emitln(&format!(
-            "  %sp_sr_{l} = load i64, i64* @sp"
-        ));
+        self.emitln(&format!("  %sp_sr_{l} = load i64, i64* @sp"));
         // Get last element
-        self.emitln(&format!(
-            "  %sr_last_sp_{l} = sub i64 %sp_sr_{l}, 1"
-        ));
+        self.emitln(&format!("  %sr_last_sp_{l} = sub i64 %sp_sr_{l}, 1"));
         self.emitln(&format!(
             "  %sr_last_ptr_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %sr_last_sp_{l}",
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sr_last_{l} = load i64, i64* %sr_last_ptr_{l}"
-        ));
+        self.emitln(&format!("  %sr_last_{l} = load i64, i64* %sr_last_ptr_{l}"));
         // memmove(stack[fb+1], stack[fb], (sp - fb - 1)*8)
-        self.emitln(&format!(
-            "  %sr_fbd_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %sr_fbd_d_{l} = sub i32 %sr_fbd_{l}, 1"
-        ));
+        self.emitln(&format!("  %sr_fbd_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %sr_fbd_d_{l} = sub i32 %sr_fbd_{l}, 1"));
         self.emitln(&format!(
             "  %sr_fb_gep_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %sr_fbd_d_{l}",
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sr_fb_{l} = load i64, i64* %sr_fb_gep_{l}"
-        ));
+        self.emitln(&format!("  %sr_fb_{l} = load i64, i64* %sr_fb_gep_{l}"));
         self.emitln(&format!(
             "  %sr_src_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %sr_fb_{l}",
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %sr_dst_{l} = getelementptr i64, i64* %sr_src_{l}, i64 1"
-        ));
-        self.emitln(&format!(
-            "  %sr_count_{l} = sub i64 %sp_sr_{l}, %sr_fb_{l}"
-        ));
-        self.emitln(&format!(
-            "  %sr_count_dec_{l} = sub i64 %sr_count_{l}, 1"
-        ));
-        self.emitln(&format!(
-            "  %sr_bytes_{l} = mul i64 %sr_count_dec_{l}, 8"
-        ));
+        self.emitln(&format!("  %sr_dst_{l} = getelementptr i64, i64* %sr_src_{l}, i64 1"));
+        self.emitln(&format!("  %sr_count_{l} = sub i64 %sp_sr_{l}, %sr_fb_{l}"));
+        self.emitln(&format!("  %sr_count_dec_{l} = sub i64 %sr_count_{l}, 1"));
+        self.emitln(&format!("  %sr_bytes_{l} = mul i64 %sr_count_dec_{l}, 8"));
         self.emitln(&format!(
             "  call void @llvm.memmove.p0.p0.i64(i64* %sr_dst_{l}, i64* %sr_src_{l}, i64 %sr_bytes_{l}, i1 false)",
             l = l
@@ -1145,9 +876,7 @@ impl<'a> FuncCompiler<'a> {
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  store i64 %sr_last_{l}, i64* %sr_fb_ptr_{l}"
-        ));
+        self.emitln(&format!("  store i64 %sr_last_{l}, i64* %sr_fb_ptr_{l}"));
     }
 
     // ── Pick ───────────────────────────────────────────────
@@ -1161,28 +890,13 @@ impl<'a> FuncCompiler<'a> {
 
         let n_str = n.to_llvm();
 
-        self.emitln(&format!(
-            "  %sp_pk_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %pk_n_{l} = call i64 @pick_max(i64 {n})",
-            n = n_str,
-            l = l
-        ));
-        self.emitln(&format!(
-            "  %pk_idx_{l} = sub i64 %sp_pk_{l}, 1"
-        ));
-        self.emitln(&format!(
-            "  %pk_idx_{l} = sub i64 %pk_idx_{l}, %pk_n_{l}"
-        ));
+        self.emitln(&format!("  %sp_pk_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %pk_n_{l} = call i64 @pick_max(i64 {n})", n = n_str, l = l));
+        self.emitln(&format!("  %pk_idx_{l} = sub i64 %sp_pk_{l}, 1"));
+        self.emitln(&format!("  %pk_idx_{l} = sub i64 %pk_idx_{l}, %pk_n_{l}"));
         // Check bounds
-        self.emitln(&format!(
-            "  %pk_ge0_{l} = icmp sge i64 %pk_idx_{l}, 0",
-            l = l
-        ));
-        self.emitln(&format!(
-            "  br i1 %pk_ge0_{l}, label %pk_ok_{l}, label %pk_err_{l}"
-        ));
+        self.emitln(&format!("  %pk_ge0_{l} = icmp sge i64 %pk_idx_{l}, 0", l = l));
+        self.emitln(&format!("  br i1 %pk_ge0_{l}, label %pk_ok_{l}, label %pk_err_{l}"));
         self.emitln(&format!("pk_err_{l}:"));
         self.emitln(&"  call void @runtime_stack_underflow()".to_string());
         self.emitln(&"  unreachable".to_string());
@@ -1192,10 +906,7 @@ impl<'a> FuncCompiler<'a> {
             SZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  {r} = load i64, i64* %pk_ptr_{l}",
-            r = result
-        ));
+        self.emitln(&format!("  {r} = load i64, i64* %pk_ptr_{l}", r = result));
 
         self.push_ssa(StackEntry::Reg(result));
     }
@@ -1210,31 +921,17 @@ impl<'a> FuncCompiler<'a> {
         let n_str = n.to_llvm();
 
         // Clamp n >= 0
-        self.emitln(&format!(
-            "  %dn_n_{l} = call i64 @pick_max(i64 {n})",
-            n = n_str,
-            l = l
-        ));
+        self.emitln(&format!("  %dn_n_{l} = call i64 @pick_max(i64 {n})", n = n_str, l = l));
         // Check that we have enough elements
-        self.emitln(&format!(
-            "  %sp_dn_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %dn_ok_{l} = icmp sle i64 %dn_n_{l}, %sp_dn_{l}"
-        ));
-        self.emitln(&format!(
-            "  br i1 %dn_ok_{l}, label %dn_do_{l}, label %dn_err_{l}"
-        ));
+        self.emitln(&format!("  %sp_dn_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %dn_ok_{l} = icmp sle i64 %dn_n_{l}, %sp_dn_{l}"));
+        self.emitln(&format!("  br i1 %dn_ok_{l}, label %dn_do_{l}, label %dn_err_{l}"));
         self.emitln(&format!("dn_err_{l}:"));
         self.emitln(&"  call void @runtime_stack_underflow()".to_string());
         self.emitln(&"  unreachable".to_string());
         self.emitln(&format!("dn_do_{l}:"));
-        self.emitln(&format!(
-            "  %sp_dn_new_{l} = sub i64 %sp_dn_{l}, %dn_n_{l}"
-        ));
-        self.emitln(&format!(
-            "  store i64 %sp_dn_new_{l}, i64* @sp"
-        ));
+        self.emitln(&format!("  %sp_dn_new_{l} = sub i64 %sp_dn_{l}, %dn_n_{l}"));
+        self.emitln(&format!("  store i64 %sp_dn_new_{l}, i64* @sp"));
     }
 
     // ── 调试指令 ───────────────────────────────────────────
@@ -1248,28 +945,18 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("ds_prep_{l}:"));
 
         // Get frame base and sp
-        self.emitln(&format!(
-            "  %ds_sp_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %ds_fbd_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %ds_fbd_d_{l} = sub i32 %ds_fbd_{l}, 1"
-        ));
+        self.emitln(&format!("  %ds_sp_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %ds_fbd_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %ds_fbd_d_{l} = sub i32 %ds_fbd_{l}, 1"));
         self.emitln(&format!(
             "  %ds_fb_gep_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %ds_fbd_d_{l}",
             MD = self.config.max_call_depth,
             l = l
         ));
-        self.emitln(&format!(
-            "  %ds_fb_{l} = load i64, i64* %ds_fb_gep_{l}"
-        ));
+        self.emitln(&format!("  %ds_fb_{l} = load i64, i64* %ds_fb_gep_{l}"));
 
         // Print header to stderr
-        self.emitln(&format!(
-            "  %ds_fp_{l} = call i8* @get_stderr()"
-        ));
+        self.emitln(&format!("  %ds_fp_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
             "  %ds_hdr_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp_{l}, i8* getelementptr ([9 x i8], [9 x i8]* @dbg_header, i32 0, i32 0))"
         ));
@@ -1280,37 +967,25 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!(
             "  %ds_i_{l} = phi i64 [ %ds_fb_{l}, %ds_prep_{l} ], [ %ds_i_next_{l}, %ds_body_{l} ]"
         ));
-        self.emitln(&format!(
-            "  %ds_end_{l} = icmp eq i64 %ds_i_{l}, %ds_sp_{l}"
-        ));
-        self.emitln(&format!(
-            "  br i1 %ds_end_{l}, label %ds_done_{l}, label %ds_body_{l}"
-        ));
+        self.emitln(&format!("  %ds_end_{l} = icmp eq i64 %ds_i_{l}, %ds_sp_{l}"));
+        self.emitln(&format!("  br i1 %ds_end_{l}, label %ds_done_{l}, label %ds_body_{l}"));
         self.emitln(&format!("ds_body_{l}:"));
         self.emitln(&format!(
             "  %ds_ptr_{l} = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %ds_i_{l}",
             SSZ = self.config.stack_size,
             l = l
         ));
-        self.emitln(&format!(
-            "  %ds_val_{l} = load i64, i64* %ds_ptr_{l}"
-        ));
-        self.emitln(&format!(
-            "  %ds_fp2_{l} = call i8* @get_stderr()"
-        ));
+        self.emitln(&format!("  %ds_val_{l} = load i64, i64* %ds_ptr_{l}"));
+        self.emitln(&format!("  %ds_fp2_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
             "  %ds_pr_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp2_{l}, i8* getelementptr ([4 x i8], [4 x i8]* @dbg_fmt, i32 0, i32 0), i64 %ds_val_{l})"
         ));
-        self.emitln(&format!(
-            "  %ds_i_next_{l} = add i64 %ds_i_{l}, 1"
-        ));
+        self.emitln(&format!("  %ds_i_next_{l} = add i64 %ds_i_{l}, 1"));
         self.emitln(&format!("  br label %ds_loop_hdr_{l}"));
         self.emitln(&format!("ds_done_{l}:"));
 
         // Print closing newline
-        self.emitln(&format!(
-            "  %ds_fp3_{l} = call i8* @get_stderr()"
-        ));
+        self.emitln(&format!("  %ds_fp3_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
             "  %ds_nl_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp3_{l}, i8* getelementptr ([2 x i8], [2 x i8]* @dbg_nl, i32 0, i32 0))"
         ));
@@ -1321,15 +996,9 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
 
         self.emitln(&"  ; DumpState: print VM state to stderr".to_string());
-        self.emitln(&format!(
-            "  %dss_sp_{l} = load i64, i64* @sp"
-        ));
-        self.emitln(&format!(
-            "  %dss_fbd_{l} = load i32, i32* @frame_depth"
-        ));
-        self.emitln(&format!(
-            "  %dss_fp_{l} = call i8* @get_stderr()"
-        ));
+        self.emitln(&format!("  %dss_sp_{l} = load i64, i64* @sp"));
+        self.emitln(&format!("  %dss_fbd_{l} = load i32, i32* @frame_depth"));
+        self.emitln(&format!("  %dss_fp_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
             "  %dss_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %dss_fp_{l}, i8* getelementptr ([31 x i8], [31 x i8]* @dbg_state_fmt, i32 0, i32 0), i64 %dss_sp_{l}, i32 %dss_fbd_{l})",
             l = l
@@ -1441,10 +1110,7 @@ ret_n:
         let mut fc = FuncCompiler::new(config);
         fc.current_func = Some(*name);
 
-        out.push_str(&format!(
-            "define void @sd_func_{name}() {{\nentry:\n",
-            name = name
-        ));
+        out.push_str(&format!("define void @sd_func_{name}() {{\nentry:\n", name = name));
         fc.compile_body(&func_def.body);
         out.push_str(&fc.output);
         out.push_str("  ret void\n}\n\n");
@@ -1584,13 +1250,15 @@ mod tests {
         // Push(5) Dup Eq — Dup makes the comparison runtime-dependent
         let src = "          + +=";
         let ir = compile_source(src);
-        assert!(ir.contains("icmp eq i64") || ir.contains("icmp ne i64"),
-                "should generate comparison IR");
+        assert!(
+            ir.contains("icmp eq i64") || ir.contains("icmp ne i64"),
+            "should generate comparison IR"
+        );
     }
 
     #[test]
     fn compile_cmp_ne() {
-        let src = "          + + =";  // Push(5) Dup Ne
+        let src = "          + + ="; // Push(5) Dup Ne
         let ir = compile_source(src);
         assert!(ir.contains("icmp ne i64"), "should generate icmp ne");
     }
@@ -1938,10 +1606,13 @@ mod tests {
         // "checked_add" appears in the function definition from intrinsics,
         // but there should be no CALL to checked_add from the main function
         let sd_main_pos = ir.find("define void @sd_main").unwrap();
-        let sd_main_end = ir[sd_main_pos..].find("define i64 @main").unwrap_or(ir.len() - sd_main_pos);
+        let sd_main_end =
+            ir[sd_main_pos..].find("define i64 @main").unwrap_or(ir.len() - sd_main_pos);
         let sd_main_body = &ir[sd_main_pos..sd_main_pos + sd_main_end];
-        assert!(!sd_main_body.contains("call i64 @checked_add"),
-                "optimizer should fold 5+3, no checked_add call needed");
+        assert!(
+            !sd_main_body.contains("call i64 @checked_add"),
+            "optimizer should fold 5+3, no checked_add call needed"
+        );
         // The folded constant should appear in the IR
         assert!(ir.contains("i64 8"), "folded value 8 should appear in IR");
     }

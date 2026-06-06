@@ -1,17 +1,18 @@
-use std::collections::HashMap;
-use std::io::{self, Read, Write};
-use std::rc::Rc;
-use std::time::Instant;
 use crate::stardust::config::VmConfig;
 use crate::stardust::{
     CallFrame, ErrorKind, InstrMeta, Instruction, ParseResult, StardustError, VM,
 };
+use std::collections::HashMap;
+use std::io::{self, Read, Write};
+use std::rc::Rc;
+use std::time::Instant;
 
 /// 弹出帧栈顶，错误携带源码位置
 fn pop_frame(frame: &mut CallFrame, meta: &InstrMeta) -> Result<i64, StardustError> {
-    frame.stack.pop().ok_or_else(|| {
-        StardustError::new(ErrorKind::StackUnderflow, Some(meta.span.clone()))
-    })
+    frame
+        .stack
+        .pop()
+        .ok_or_else(|| StardustError::new(ErrorKind::StackUnderflow, Some(meta.span.clone())))
 }
 
 /// 创建带源码位置的错误
@@ -49,9 +50,7 @@ impl VmIO for StdIO {
     fn read_num(&mut self) -> io::Result<i64> {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        input.trim()
-            .parse()
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        input.trim().parse().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -77,11 +76,7 @@ impl VmSnapshot {
             frames: vm
                 .all_frames()
                 .iter()
-                .map(|f| FrameSnapshot {
-                    stack: f.stack.clone(),
-                    pc: f.pc,
-                    ret_pc: f.ret_pc,
-                })
+                .map(|f| FrameSnapshot { stack: f.stack.clone(), pc: f.pc, ret_pc: f.ret_pc })
                 .collect(),
             heap: vm.heap_entries().clone(),
             halted: vm.halted,
@@ -149,27 +144,21 @@ fn execute_in_frame<I: VmIO>(
         Instruction::Add(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a
-                .checked_add(b)
-                .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
+            let r = a.checked_add(b).ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
         }
         Instruction::Sub(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a
-                .checked_sub(b)
-                .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
+            let r = a.checked_sub(b).ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
         }
         Instruction::Mul(meta) => {
             let b = pop_frame(frame, meta)?;
             let a = pop_frame(frame, meta)?;
-            let r = a
-                .checked_mul(b)
-                .ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
+            let r = a.checked_mul(b).ok_or_else(|| framed_err(ErrorKind::IntegerOverflow, meta))?;
             frame.stack.push(r);
             frame.pc += 1;
         }
@@ -220,15 +209,17 @@ fn execute_in_frame<I: VmIO>(
                     if !(0..=127).contains(&val) {
                         return Err(framed_err(ErrorKind::InvalidAscii { value: val }, meta));
                     }
-                    io.write_char(val as u8 as char)
-                        .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+                    io.write_char(val as u8 as char).map_err(|e| {
+                        framed_err(ErrorKind::IoError { reason: e.to_string() }, meta)
+                    })?;
                 }
                 crate::stardust::config::CharMode::Unicode => {
                     let ch = char::from_u32(val as u32).ok_or_else(|| {
                         framed_err(ErrorKind::InvalidCodePoint { value: val }, meta)
                     })?;
-                    io.write_char(ch)
-                        .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
+                    io.write_char(ch).map_err(|e| {
+                        framed_err(ErrorKind::IoError { reason: e.to_string() }, meta)
+                    })?;
                 }
             }
             frame.pc += 1;
@@ -412,11 +403,7 @@ fn execute_in_frame<I: VmIO>(
         }
 
         // ── 函数调用 ────────────────────────────────────────
-        Instruction::Call {
-            name,
-            argc,
-            meta,
-        } => {
+        Instruction::Call { name, argc, meta } => {
             frame.pc += 1;
             return Ok(Some((*name, *argc, meta.clone())));
         }
@@ -430,10 +417,8 @@ fn execute_in_frame<I: VmIO>(
 
 impl VM {
     pub fn new(parse_result: ParseResult, config: VmConfig) -> Self {
-        let main_frame = CallFrame::new(
-            Rc::new(parse_result.main_instructions),
-            parse_result.main_marks,
-        );
+        let main_frame =
+            CallFrame::new(Rc::new(parse_result.main_instructions), parse_result.main_marks);
         VM {
             functions: parse_result.functions,
             frames: vec![main_frame],
@@ -473,10 +458,7 @@ impl VM {
             if steps % 1000 == 0 {
                 if let Some(limit_secs) = self.config.time_limit_secs {
                     if start_time.elapsed().as_secs() >= limit_secs {
-                        return Err(StardustError::new(
-                            ErrorKind::TimeLimitExceeded,
-                            None,
-                        ));
+                        return Err(StardustError::new(ErrorKind::TimeLimitExceeded, None));
                     }
                 }
             }
@@ -556,15 +538,12 @@ impl VM {
         }
 
         // 查找函数定义（含预计算的 marks）
-        let func_def = self
-            .functions
-            .get(&func_name)
-            .ok_or_else(|| {
-                StardustError::new(
-                    ErrorKind::UndefinedFunction { name: func_name },
-                    Some(call_meta.span.clone()),
-                )
-            })?;
+        let func_def = self.functions.get(&func_name).ok_or_else(|| {
+            StardustError::new(
+                ErrorKind::UndefinedFunction { name: func_name },
+                Some(call_meta.span.clone()),
+            )
+        })?;
 
         // Rc::clone 仅增加引用计数，不复制指令数据
         let body = Rc::clone(&func_def.body);

@@ -11,12 +11,7 @@ pub fn format_stack(stack: &[i64], max_items: usize) -> String {
         return "  Stack: (empty)".into();
     }
     let limit = max_items.min(stack.len());
-    let items: Vec<String> = stack
-        .iter()
-        .rev()
-        .take(limit)
-        .map(|v| v.to_string())
-        .collect();
+    let items: Vec<String> = stack.iter().rev().take(limit).map(|v| v.to_string()).collect();
     let mut s = format!("  Stack (top→bottom): [{}]", items.join(", "));
     if stack.len() > max_items {
         s.push_str(&format!(" ... ({} more)", stack.len() - max_items));
@@ -75,13 +70,7 @@ pub fn format_nearby(frame: &CallFrame, radius: usize) -> String {
         } else {
             format!("  ; {}", marks_here.join(", "))
         };
-        lines.push(format!(
-            "  {} {:4}: {}{}",
-            mark,
-            i,
-            frame.instructions[i].format(),
-            suffix
-        ));
+        lines.push(format!("  {} {:4}: {}{}", mark, i, frame.instructions[i].format(), suffix));
     }
     lines.join("\n")
 }
@@ -180,10 +169,7 @@ mod tests {
     #[test]
     fn format_nearby_shows_current_pc_marker() {
         let frame = CallFrame::new(
-            Rc::new(vec![
-                Instruction::Push(1, meta()),
-                Instruction::Add(meta()),
-            ]),
+            Rc::new(vec![Instruction::Push(1, meta()), Instruction::Add(meta())]),
             HashMap::new(),
         );
         let result = format_nearby(&frame, 3);
@@ -210,10 +196,7 @@ mod tests {
 
     #[test]
     fn format_frames_single() {
-        let frame = CallFrame::new(
-            Rc::new(vec![Instruction::Push(1, meta())]),
-            HashMap::new(),
-        );
+        let frame = CallFrame::new(Rc::new(vec![Instruction::Push(1, meta())]), HashMap::new());
         let result = format_frames(&[frame]);
         assert!(result.contains("1 frames"));
         assert!(result.contains("#0 main"));
@@ -221,14 +204,8 @@ mod tests {
 
     #[test]
     fn format_frames_multiple() {
-        let f1 = CallFrame::new(
-            Rc::new(vec![Instruction::Push(1, meta())]),
-            HashMap::new(),
-        );
-        let f2 = CallFrame::new(
-            Rc::new(vec![Instruction::Add(meta())]),
-            HashMap::new(),
-        );
+        let f1 = CallFrame::new(Rc::new(vec![Instruction::Push(1, meta())]), HashMap::new());
+        let f2 = CallFrame::new(Rc::new(vec![Instruction::Add(meta())]), HashMap::new());
         let result = format_frames(&[f1, f2]);
         assert!(result.contains("2 frames"));
         assert!(result.contains("#0 main"));

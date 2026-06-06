@@ -14,17 +14,13 @@ use crate::stardust::debugger::Debugger;
 use crate::stardust::lexer::tokenize;
 use crate::stardust::parser::parse_program;
 use executor::ReplContext;
-use std::io::{self, Write};
 use std::fs;
+use std::io::{self, Write};
 
 /// REPL 入口
 pub fn repl_main(debug_mode: bool, file_to_load: Option<&str>) {
     let mut ctx = ReplContext::new();
-    let mut debugger = if debug_mode {
-        Some(Debugger::new())
-    } else {
-        None
-    };
+    let mut debugger = if debug_mode { Some(Debugger::new()) } else { None };
     let mut history: Vec<String> = Vec::new();
     let mut raw_mode = false;
 
@@ -72,13 +68,7 @@ pub fn repl_main(debug_mode: bool, file_to_load: Option<&str>) {
 
         // 元命令
         if input.starts_with(':') {
-            match handle_meta(
-                &input,
-                &mut ctx,
-                &mut debugger,
-                &mut raw_mode,
-                &history,
-            ) {
+            match handle_meta(&input, &mut ctx, &mut debugger, &mut raw_mode, &history) {
                 MetaAction::Quit => break,
                 MetaAction::Error(msg) => eprintln!("Error: {}", msg),
                 _ => {}
@@ -133,20 +123,11 @@ fn detect_mode(input: &str) -> InputMode {
     }
 }
 
-fn parse_input(
-    input: &str,
-    force_raw: bool,
-) -> Result<Vec<crate::stardust::Instruction>, String> {
-    let mode = if force_raw {
-        InputMode::Raw
-    } else {
-        detect_mode(input)
-    };
+fn parse_input(input: &str, force_raw: bool) -> Result<Vec<crate::stardust::Instruction>, String> {
+    let mode = if force_raw { InputMode::Raw } else { detect_mode(input) };
 
     match mode {
-        InputMode::Shorthand => {
-            parser::parse_shorthand(input).map_err(|e| e.to_string())
-        }
+        InputMode::Shorthand => parser::parse_shorthand(input).map_err(|e| e.to_string()),
         InputMode::Raw => {
             let tokens = tokenize(input).map_err(|e| e.message)?;
             let parsed = parse_program(tokens).map_err(|e| e.message)?;
@@ -260,11 +241,7 @@ fn handle_meta(
             *raw_mode = !*raw_mode;
             eprintln!(
                 "Input mode: {}",
-                if *raw_mode {
-                    "raw .sd syntax"
-                } else {
-                    "shorthand (auto-detect)"
-                }
+                if *raw_mode { "raw .sd syntax" } else { "shorthand (auto-detect)" }
             );
             MetaAction::Ok
         }
@@ -350,10 +327,7 @@ fn handle_meta(
             }
         }
 
-        _ => MetaAction::Error(format!(
-            "Unknown command ':{}'. Type :help for commands.",
-            name
-        )),
+        _ => MetaAction::Error(format!("Unknown command ':{}'. Type :help for commands.", name)),
     }
 }
 
@@ -381,13 +355,8 @@ fn show_stack_status(ctx: &ReplContext) {
     }
     let depth = ctx.stack.len();
     let display_count = 5.min(depth);
-    let items: Vec<String> = ctx
-        .stack
-        .iter()
-        .rev()
-        .take(display_count)
-        .map(|v| v.to_string())
-        .collect();
+    let items: Vec<String> =
+        ctx.stack.iter().rev().take(display_count).map(|v| v.to_string()).collect();
     let mut status = format!("→ [{}]", items.join(", "));
     if depth > display_count {
         status.push_str(&format!(" ... ({} more)", depth - display_count));

@@ -99,9 +99,8 @@ fn apply_config(config: &mut VmConfig, key: &str, value: &str) -> Result<(), Par
             })?;
         }
         "max_heap" => {
-            config.max_heap_entries = value.parse().map_err(|_| ParseConfigError::InvalidValue {
-                key: key.to_string(),
-                value: value.to_string(),
+            config.max_heap_entries = value.parse().map_err(|_| {
+                ParseConfigError::InvalidValue { key: key.to_string(), value: value.to_string() }
             })?;
         }
         "max_call_depth" => {
@@ -128,9 +127,7 @@ fn apply_config(config: &mut VmConfig, key: &str, value: &str) -> Result<(), Par
             }
         },
         _ => {
-            return Err(ParseConfigError::UnknownKey {
-                key: key.to_string(),
-            });
+            return Err(ParseConfigError::UnknownKey { key: key.to_string() });
         }
     }
     Ok(())

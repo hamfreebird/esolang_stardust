@@ -1,15 +1,15 @@
 use crate::stardust::debugger::Debugger;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::rc::Rc;
-use serde::Serialize;
 
 pub mod config;
 pub mod debugger;
+pub mod error;
 pub mod lexer;
 pub mod parser;
-pub mod vm;
 pub mod utils;
-pub mod error;
+pub mod vm;
 
 /// 最大调用深度 — 防止无限递归
 pub const MAX_CALL_DEPTH: usize = 256;
@@ -32,64 +32,64 @@ pub enum TokenType {
     Tilde,      // '~'
     Hash,       // '#"
     Annotation, // '//'
-
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Token {
-    pub spaces: usize,          // 前导空格数量
+    pub spaces: usize, // 前导空格数量
     pub token_type: TokenType,
     pub line: usize,
     pub column: usize,
-    pub byte_pos: usize,}
+    pub byte_pos: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Instruction {
-    Push(i64, InstrMeta),                  // (n >= 5) +  -> n-5
-    Dup(InstrMeta),                        // 1 +
-    Swap(InstrMeta),                       // 2 +
-    Rotate(InstrMeta),                     // 3 +
-    Pop(InstrMeta),                        // 4 +
-    Add(InstrMeta),                        // 0 *
-    Sub(InstrMeta),                        // 1 *
-    Mul(InstrMeta),                        // 2 *
-    Div(InstrMeta),                        // 3 *
-    Mod(InstrMeta),                        // 4 *
-    Reverse(InstrMeta),                    // 5 *
-    NumOut(InstrMeta),                     // 0 .
-    NumIn(InstrMeta),                      // 1 .
-    CharOut(InstrMeta),                    // 0 ,
-    CharIn(InstrMeta),                     // 1 ,
-    Mark { name: usize, meta: InstrMeta },       // (n) `
-    Jump { name: usize, meta: InstrMeta },       // (n) '
+    Push(i64, InstrMeta),                               // (n >= 5) +  -> n-5
+    Dup(InstrMeta),                                     // 1 +
+    Swap(InstrMeta),                                    // 2 +
+    Rotate(InstrMeta),                                  // 3 +
+    Pop(InstrMeta),                                     // 4 +
+    Add(InstrMeta),                                     // 0 *
+    Sub(InstrMeta),                                     // 1 *
+    Mul(InstrMeta),                                     // 2 *
+    Div(InstrMeta),                                     // 3 *
+    Mod(InstrMeta),                                     // 4 *
+    Reverse(InstrMeta),                                 // 5 *
+    NumOut(InstrMeta),                                  // 0 .
+    NumIn(InstrMeta),                                   // 1 .
+    CharOut(InstrMeta),                                 // 0 ,
+    CharIn(InstrMeta),                                  // 1 ,
+    Mark { name: usize, meta: InstrMeta },              // (n) `
+    Jump { name: usize, meta: InstrMeta },              // (n) '
     Call { name: usize, argc: usize, meta: InstrMeta }, // (n1) : (n2) ;
     // 危险操作
     UnconditionalJump { name: usize, meta: InstrMeta }, // (n) ~
     // ── 比较运算（符号 =）────────────────────────────────
-    Eq(InstrMeta),                          // 0 =  相等
-    Ne(InstrMeta),                          // 1 =  不等
-    Lt(InstrMeta),                          // 2 =  小于
-    Gt(InstrMeta),                          // 3 =  大于
-    Le(InstrMeta),                          // 4 =  小于等于
-    Ge(InstrMeta),                          // 5 =  大于等于
+    Eq(InstrMeta), // 0 =  相等
+    Ne(InstrMeta), // 1 =  不等
+    Lt(InstrMeta), // 2 =  小于
+    Gt(InstrMeta), // 3 =  大于
+    Le(InstrMeta), // 4 =  小于等于
+    Ge(InstrMeta), // 5 =  大于等于
     // ── 逻辑运算（符号 &）────────────────────────────────
-    And(InstrMeta),                         // 0 &  逻辑与
-    Or(InstrMeta),                          // 1 &  逻辑或
-    Not(InstrMeta),                         // 2 &  逻辑非（仅弹出1个值）
-    Xor(InstrMeta),                         // 3 &  逻辑异或
+    And(InstrMeta), // 0 &  逻辑与
+    Or(InstrMeta),  // 1 &  逻辑或
+    Not(InstrMeta), // 2 &  逻辑非（仅弹出1个值）
+    Xor(InstrMeta), // 3 &  逻辑异或
     // ── 堆操作（符号 -）──────────────────────────────────
-    Store(InstrMeta),                       // 0 -  弹出 addr val, heap[addr]=val
-    Load(InstrMeta),                        // 1 -  弹出 addr, 压入 heap[addr]
+    Store(InstrMeta), // 0 -  弹出 addr val, heap[addr]=val
+    Load(InstrMeta),  // 1 -  弹出 addr, 压入 heap[addr]
     // ── 栈扩展（符号 < >）───────────────────────────────
-    ShiftL(InstrMeta),                      // 0 <  循环左移 [a1..aN]→[a2..aN,a1]
-    Depth(InstrMeta),                       // 1 <  压入栈深度
-    Pick(InstrMeta),                        // 2 <  弹出n, 复制aN-n压入
-    ShiftR(InstrMeta),                      // 0 >  循环右移 [a1..aN]→[aN,a1..aN-1]
-    DropN(InstrMeta),                       // 1 >  弹出n, 丢弃栈顶n个元素
+    ShiftL(InstrMeta), // 0 <  循环左移 [a1..aN]→[a2..aN,a1]
+    Depth(InstrMeta),  // 1 <  压入栈深度
+    Pick(InstrMeta),   // 2 <  弹出n, 复制aN-n压入
+    ShiftR(InstrMeta), // 0 >  循环右移 [a1..aN]→[aN,a1..aN-1]
+    DropN(InstrMeta),  // 1 >  弹出n, 丢弃栈顶n个元素
     // ── 调试（符号 #）────────────────────────────────────
-    DumpStack(InstrMeta),                   // 0 #  输出栈内容到stderr
-    DumpState(InstrMeta),                   // 1 #  输出解释器状态到stderr
-    Breakpoint(InstrMeta),                  // 2 #  调试断点（仅--debug模式生效）
+    DumpStack(InstrMeta),  // 0 #  输出栈内容到stderr
+    DumpState(InstrMeta),  // 1 #  输出解释器状态到stderr
+    Breakpoint(InstrMeta), // 2 #  调试断点（仅--debug模式生效）
 }
 
 impl Instruction {
@@ -177,13 +177,7 @@ pub struct CallFrame {
 
 impl CallFrame {
     pub fn new(instructions: Rc<Vec<Instruction>>, marks: HashMap<usize, usize>) -> Self {
-        CallFrame {
-            instructions,
-            stack: Vec::new(),
-            pc: 0,
-            marks,
-            ret_pc: 0,
-        }
+        CallFrame { instructions, stack: Vec::new(), pc: 0, marks, ret_pc: 0 }
     }
 }
 
@@ -248,10 +242,7 @@ impl VM {
 
     /// 取出主帧栈（REPL 状态保存）
     pub fn take_main_stack(&mut self) -> Vec<i64> {
-        self.frames
-            .first_mut()
-            .map(|f| std::mem::take(&mut f.stack))
-            .unwrap_or_default()
+        self.frames.first_mut().map(|f| std::mem::take(&mut f.stack)).unwrap_or_default()
     }
 
     /// 设置堆（REPL 状态注入）
@@ -280,17 +271,13 @@ pub struct InstrMeta {
 
 impl InstrMeta {
     pub fn new(line: usize, column: usize) -> Self {
-        InstrMeta {
-            span: SourceSpan { line, column },
-        }
+        InstrMeta { span: SourceSpan { line, column } }
     }
 }
 
 impl Default for InstrMeta {
     fn default() -> Self {
-        InstrMeta {
-            span: SourceSpan { line: 1, column: 1 },
-        }
+        InstrMeta { span: SourceSpan { line: 1, column: 1 } }
     }
 }
 
