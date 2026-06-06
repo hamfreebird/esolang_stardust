@@ -130,18 +130,63 @@ function getInstructionHint(spaces, symbol) {
                 return '**CharOut** — 弹出栈顶并以 ASCII 字符输出';
             if (spaces === 1)
                 return '**CharIn** — 从标准输入读取一个字符并压栈';
+        // ── 堆操作（符号 -）───────────────────────────────
         case '-':
-            return `**比较/赋值符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**Store** — 弹出 addr 和 val，写入堆\n`heap[addr] = val`';
+            if (spaces === 1)
+                return '**Load** — 弹出 addr，从堆读取并压栈\n`push heap[addr]`';
+            return `**堆操作** (空格数=${spaces}) — 无效（仅支持 0 或 1）`;
+        // ── 比较运算（符号 =）───────────────────────────────
         case '=':
-            return `**比较/赋值符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**Eq** — 弹出两个值，相等压 1 否则 0\n`a b → (a == b)`';
+            if (spaces === 1)
+                return '**Ne** — 弹出两个值，不等压 1 否则 0\n`a b → (a != b)`';
+            if (spaces === 2)
+                return '**Lt** — 弹出两个值，小于压 1 否则 0\n`a b → (a < b)`';
+            if (spaces === 3)
+                return '**Gt** — 弹出两个值，大于压 1 否则 0\n`a b → (a > b)`';
+            if (spaces === 4)
+                return '**Le** — 弹出两个值，小于等于压 1 否则 0\n`a b → (a <= b)`';
+            if (spaces === 5)
+                return '**Ge** — 弹出两个值，大于等于压 1 否则 0\n`a b → (a >= b)`';
+            return `**比较运算** (空格数=${spaces}) — 无效（仅支持 0-5）`;
+        // ── 栈扩展（符号 < >）───────────────────────────────
         case '<':
-            return `**比较/赋值符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**ShiftL** — 循环左移\n`[a1..aN] → [a2..aN, a1]`';
+            if (spaces === 1)
+                return '**Depth** — 压入当前栈深度';
+            if (spaces === 2)
+                return '**Pick** — 弹出 n，从栈底方向复制第 n 个元素\n`push stack[depth-1-n]`';
+            return `**栈扩展** (空格数=${spaces}) — 无效（仅支持 0-2）`;
         case '>':
-            return `**比较/赋值符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**ShiftR** — 循环右移\n`[a1..aN] → [aN, a1..aN-1]`';
+            if (spaces === 1)
+                return '**DropN** — 弹出 n，丢弃栈顶 n 个元素';
+            return `**栈扩展** (空格数=${spaces}) — 无效（仅支持 0-1）`;
+        // ── 逻辑运算（符号 &）───────────────────────────────
         case '&':
-            return `**逻辑符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**And** — 弹出两个值，逻辑与\n`a b → (a && b)`';
+            if (spaces === 1)
+                return '**Or** — 弹出两个值，逻辑或\n`a b → (a || b)`';
+            if (spaces === 2)
+                return '**Not** — 弹出一个值，逻辑非\n`a → (!a)`';
+            if (spaces === 3)
+                return '**Xor** — 弹出两个值，逻辑异或\n`a b → (a xor b)`';
+            return `**逻辑运算** (空格数=${spaces}) — 无效（仅支持 0-3）`;
+        // ── 调试（符号 #）───────────────────────────────────
         case '#':
-            return `**调试符号** (空格数=${spaces}) — 保留关键字`;
+            if (spaces === 0)
+                return '**DumpStack** — 输出整个栈内容到 stderr（调试）';
+            if (spaces === 1)
+                return '**DumpState** — 输出 PC/栈深度/堆大小到 stderr（调试）';
+            if (spaces === 2)
+                return '**Breakpoint** — 调试断点（仅 `--debug` 模式暂停）';
+            return `**调试指令** (空格数=${spaces}) — 无效（仅支持 0-2）`;
     }
     return null;
 }
@@ -206,7 +251,8 @@ async function runCurrentFile() {
         // 在集成终端中运行
         const terminal = vscode.window.activeTerminal || vscode.window.createTerminal('Stardust');
         terminal.show();
-        terminal.sendText(`${cliPath} "${document.fileName}"`);
+        const safePath = document.fileName.replace(/([$`"\\!])/g, '\\$1');
+        terminal.sendText(`${cliPath} "${safePath}"`);
     }
     else {
         // 在 Output 面板中运行
@@ -259,7 +305,63 @@ function activate(context) {
     context.subscriptions.push(vscode.commands.registerCommand('stardust.run', runCurrentFile));
     context.subscriptions.push(vscode.commands.registerCommand('stardust.check', checkCurrentFile));
     context.subscriptions.push(vscode.commands.registerCommand('stardust.compile', async () => {
-        vscode.window.showInformationMessage('Stardust: Use "stardust --stardust <input> [output]" from the terminal.');
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor');
+            return;
+        }
+        const document = editor.document;
+        if (document.languageId !== 'sd') {
+            // 非 .sd 文件 — 当作源文本处理，转换为 Stardust 代码
+            if (document.isDirty)
+                await document.save();
+            const inputFile = document.fileName;
+            const outputFile = inputFile.replace(/\.\w+$/, '.stardust');
+            const cliPath = getCliPath();
+            (0, child_process_1.execFile)(cliPath, ['--stardust', inputFile, outputFile], { timeout: 30000 }, (error, stdout, stderr) => {
+                if (error && !stdout) {
+                    vscode.window.showErrorMessage(`Stardust: Compilation failed — ${stderr || error.message}`);
+                }
+                else {
+                    vscode.window.showInformationMessage(`Stardust: Generated ${outputFile}`);
+                }
+            });
+            return;
+        }
+        // .sd 文件 — 编译为 LLVM IR
+        if (document.isDirty)
+            await document.save();
+        const inputFile = document.fileName;
+        const outputFile = inputFile.replace(/\.(sd|stardust)$/, '.ll');
+        const cliPath = getCliPath();
+        (0, child_process_1.execFile)(cliPath, ['--compile', inputFile, outputFile], { timeout: 30000 }, (error, stdout, stderr) => {
+            if (error && !stdout) {
+                vscode.window.showErrorMessage(`Stardust: Compilation failed — ${stderr || error.message}`);
+            }
+            else {
+                vscode.window.showInformationMessage(`Stardust: LLVM IR generated → ${outputFile}`);
+            }
+        });
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('stardust.debug', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor');
+            return;
+        }
+        const document = editor.document;
+        if (document.languageId !== 'sd') {
+            vscode.window.showWarningMessage('Not a Stardust (.sd) file');
+            return;
+        }
+        if (document.isDirty)
+            await document.save();
+        const cliPath = getCliPath();
+        const terminal = vscode.window.activeTerminal
+            || vscode.window.createTerminal('Stardust Debug');
+        terminal.show();
+        const safePath = document.fileName.replace(/([$`"\\!])/g, '\\$1');
+        terminal.sendText(`${cliPath} --debug "${safePath}"`);
     }));
     // 注册诊断集合
     context.subscriptions.push(diagnosticCollection);
@@ -270,9 +372,11 @@ function activate(context) {
             runCheck(doc);
         }
     }));
-    // 打开文件时检查
+    // 初次打开文件时检查（仅首次，后续仅保存时触发）
+    let checkedInitially = false;
     context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && editor.document.languageId === 'sd') {
+        if (!checkedInitially && editor && editor.document.languageId === 'sd') {
+            checkedInitially = true;
             const checkOnSave = vscode.workspace.getConfiguration('stardust').get('checkOnSave') ?? true;
             if (checkOnSave) {
                 runCheck(editor.document);
@@ -282,6 +386,7 @@ function activate(context) {
     // 初始检查
     const editor = vscode.window.activeTextEditor;
     if (editor && editor.document.languageId === 'sd') {
+        checkedInitially = true;
         runCheck(editor.document);
     }
 }

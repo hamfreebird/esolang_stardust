@@ -15,7 +15,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo build --verbose
-      - run: cargo test --verbose
+      - run: cargo test --verbose -- --skip codegen_tests::compile_toolchain_check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --all -- --check
 

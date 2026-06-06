@@ -6,8 +6,8 @@ fn main() {
         res.set("FileDescription", "Stardust Language Interpreter");
         res.set("ProductName", "Stardust Language Interpreter");
         res.set("LegalCopyright", "Copyright © 2026 freebird");
-        res.set("FileVersion", "0.1.5");
-        res.set("ProductVersion", "0.1.5");
+        res.set("FileVersion", "0.1.6");
+        res.set("ProductVersion", "0.1.6");
         res.compile().unwrap();
     }
 }

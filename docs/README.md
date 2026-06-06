@@ -1,6 +1,6 @@
 # Stardust Language Documentation
 
-> **Version 0.1.5** — 完整语言规范、实现细节、错误类型与运行时行为
+> **Version 0.1.6** — 完整语言规范、实现细节、错误类型与运行时行为
 
 Stardust 是一种受 **Starry** 与 **Whitespace** 启发的深奥编程语言（esolang）。程序仅由**空格** ` ` 与 **16 种符号字符**构成，每条指令由 **前导空格数量 + 一个符号字符** 唯一定义。
 

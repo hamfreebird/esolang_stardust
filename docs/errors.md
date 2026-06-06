@@ -179,7 +179,7 @@ Error: undefined mark '99' at line 5, column 10
 
 ### 6.1 ErrorKind::default_message()
 
-每个变体硬编码了默认消息（大多数为英文）。`_` 通配分支提供中文 catch-all 消息。
+每个变体硬编码了默认消息，最后格式化输出。
 
 ### 6.2 from impl
 

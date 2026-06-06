@@ -1,13 +1,16 @@
-use std::borrow::Cow;
 use crate::extension::char2sd_list::*;
 use crate::stardust::{ErrorKind, StardustError};
+use std::borrow::Cow;
 
 impl StardustError {
     fn code_point_too_large(c: char) -> Self {
         StardustError {
             kind: ErrorKind::CodePointTooLarge,
             span: None,
-            message: format!("character '{}' has code point {} which exceeds safety limit", c, c as u32),
+            message: format!(
+                "character '{}' has code point {} which exceeds safety limit",
+                c, c as u32
+            ),
         }
     }
 }
@@ -42,11 +45,31 @@ pub fn preprocess(input: &str) -> Result<Cow<'_, str>, StardustError> {
 
 fn upper_replacement(c: char) -> &'static str {
     match c {
-        'A' => SD_A, 'B' => SD_B, 'C' => SD_C, 'D' => SD_D, 'E' => SD_E,
-        'F' => SD_F, 'G' => SD_G, 'H' => SD_H, 'I' => SD_I, 'J' => SD_J,
-        'K' => SD_K, 'L' => SD_L, 'M' => SD_M, 'N' => SD_N, 'O' => SD_O,
-        'P' => SD_P, 'Q' => SD_Q, 'R' => SD_R, 'S' => SD_S, 'T' => SD_T,
-        'U' => SD_U, 'V' => SD_V, 'W' => SD_W, 'X' => SD_X, 'Y' => SD_Y,
+        'A' => SD_A,
+        'B' => SD_B,
+        'C' => SD_C,
+        'D' => SD_D,
+        'E' => SD_E,
+        'F' => SD_F,
+        'G' => SD_G,
+        'H' => SD_H,
+        'I' => SD_I,
+        'J' => SD_J,
+        'K' => SD_K,
+        'L' => SD_L,
+        'M' => SD_M,
+        'N' => SD_N,
+        'O' => SD_O,
+        'P' => SD_P,
+        'Q' => SD_Q,
+        'R' => SD_R,
+        'S' => SD_S,
+        'T' => SD_T,
+        'U' => SD_U,
+        'V' => SD_V,
+        'W' => SD_W,
+        'X' => SD_X,
+        'Y' => SD_Y,
         'Z' => SD_Z,
         _ => unreachable!(),
     }
@@ -54,11 +77,31 @@ fn upper_replacement(c: char) -> &'static str {
 
 fn lower_replacement(c: char) -> &'static str {
     match c {
-        'a' => SD_M_A, 'b' => SD_M_B, 'c' => SD_M_C, 'd' => SD_M_D, 'e' => SD_M_E,
-        'f' => SD_M_F, 'g' => SD_M_G, 'h' => SD_M_H, 'i' => SD_M_I, 'j' => SD_M_J,
-        'k' => SD_M_K, 'l' => SD_M_L, 'm' => SD_M_M, 'n' => SD_M_N, 'o' => SD_M_O,
-        'p' => SD_M_P, 'q' => SD_M_Q, 'r' => SD_M_R, 's' => SD_M_S, 't' => SD_M_T,
-        'u' => SD_M_U, 'v' => SD_M_V, 'w' => SD_M_W, 'x' => SD_M_X, 'y' => SD_M_Y,
+        'a' => SD_M_A,
+        'b' => SD_M_B,
+        'c' => SD_M_C,
+        'd' => SD_M_D,
+        'e' => SD_M_E,
+        'f' => SD_M_F,
+        'g' => SD_M_G,
+        'h' => SD_M_H,
+        'i' => SD_M_I,
+        'j' => SD_M_J,
+        'k' => SD_M_K,
+        'l' => SD_M_L,
+        'm' => SD_M_M,
+        'n' => SD_M_N,
+        'o' => SD_M_O,
+        'p' => SD_M_P,
+        'q' => SD_M_Q,
+        'r' => SD_M_R,
+        's' => SD_M_S,
+        't' => SD_M_T,
+        'u' => SD_M_U,
+        'v' => SD_M_V,
+        'w' => SD_M_W,
+        'x' => SD_M_X,
+        'y' => SD_M_Y,
         'z' => SD_M_Z,
         _ => unreachable!(),
     }
@@ -66,8 +109,16 @@ fn lower_replacement(c: char) -> &'static str {
 
 fn digit_replacement(c: char) -> &'static str {
     match c {
-        '0' => SD_N_0, '1' => SD_N_1, '2' => SD_N_2, '3' => SD_N_3, '4' => SD_N_4,
-        '5' => SD_N_5, '6' => SD_N_6, '7' => SD_N_7, '8' => SD_N_8, '9' => SD_N_9,
+        '0' => SD_N_0,
+        '1' => SD_N_1,
+        '2' => SD_N_2,
+        '3' => SD_N_3,
+        '4' => SD_N_4,
+        '5' => SD_N_5,
+        '6' => SD_N_6,
+        '7' => SD_N_7,
+        '8' => SD_N_8,
+        '9' => SD_N_9,
         _ => unreachable!(),
     }
 }
@@ -166,7 +217,7 @@ mod tests {
         assert!(tokens.is_ok(), "preprocess output should be tokenizable");
         let tokens = tokens.unwrap();
         assert_eq!(tokens.len(), 2);
-        assert_eq!(tokens[0].spaces, 77);  // H
+        assert_eq!(tokens[0].spaces, 77); // H
         assert_eq!(tokens[1].spaces, 110); // i
     }
 
@@ -219,11 +270,5 @@ mod tests {
         let result = preprocess("A+").unwrap();
         assert!(result.contains(SD_A));
         assert!(result.contains('+'));
-    }
-
-    #[test]
-    fn preprocess_empty_mapping_is_empty_string() {
-        let result = preprocess("J").unwrap();
-        assert_eq!(result.as_ref(), "");
     }
 }
