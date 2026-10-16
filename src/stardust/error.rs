@@ -81,9 +81,7 @@ impl ErrorKind {
             ErrorKind::CallDepthExceeded => "maximum call depth exceeded — possible infinite recursion"
                 .to_string(),
             ErrorKind::InvalidAnnotation => "invalid annotation, use '//'".to_string(),
-            ErrorKind::StackOverflow => format!(
-                "stack overflow — maximum stack size exceeded"
-            ),
+            ErrorKind::StackOverflow => "stack overflow — maximum stack size exceeded".to_string(),
             ErrorKind::HeapOverflow => "heap overflow — maximum heap entries exceeded".to_string(),
             ErrorKind::InvalidCodePoint { value } => format!(
                 "invalid Unicode code point: {}",

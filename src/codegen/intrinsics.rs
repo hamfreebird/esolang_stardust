@@ -12,52 +12,62 @@ pub const INTRINSICS_IR: &str = r#"
 ; 运行时错误处理
 ; ═══════════════════════════════════════════════════════════════
 
-@err_overflow   = private constant [24 x i8] c"integer overflow at %s\0A\00"
-@err_divzero    = private constant [24 x i8] c"division by zero at %s\0A\00"
-@err_modzero    = private constant [22 x i8] c"modulo by zero at %s\0A\00"
+;  注意：这些消息里的 `%ld` 只在带参调用点使用；
+;  早期版本带有 `at %s` 后缀，但调用点并未传参，会让 printf 读到
+;  未初始化的内存（运行时表现为错误消息尾部出现乱码字节）。
+@err_overflow   = private constant [18 x i8] c"integer overflow\0A\00"
+@err_divzero    = private constant [18 x i8] c"division by zero\0A\00"
+@err_modzero    = private constant [16 x i8] c"modulo by zero\0A\00"
 @err_badascii   = private constant [24 x i8] c"ASCII %ld out of range\0A\00"
-@err_stack      = private constant [23 x i8] c"stack underflow at %s\0A\00"
-@err_calldepth  = private constant [27 x i8] c"call depth exceeded at %s\0A\00"
+@err_stack      = private constant [17 x i8] c"stack underflow\0A\00"
+@err_calldepth  = private constant [21 x i8] c"call depth exceeded\0A\00"
 @err_heap_oob   = private constant [22 x i8] c"heap address %ld OOB\0A\00"
+@err_io         = private constant [19 x i8] c"stdin read failed\0A\00"
 
 define internal void @runtime_overflow() {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([25 x i8], [25 x i8]* @err_overflow, i32 0, i32 0))
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([18 x i8], [18 x i8]* @err_overflow, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_divzero() {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([23 x i8], [23 x i8]* @err_divzero, i32 0, i32 0))
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([18 x i8], [18 x i8]* @err_divzero, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_modzero() {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([20 x i8], [20 x i8]* @err_modzero, i32 0, i32 0))
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([16 x i8], [16 x i8]* @err_modzero, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_bad_ascii(i64 %val) {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([25 x i8], [25 x i8]* @err_badascii, i32 0, i32 0), i64 %val)
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([24 x i8], [24 x i8]* @err_badascii, i32 0, i32 0), i64 %val)
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_stack_underflow() {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([22 x i8], [22 x i8]* @err_stack, i32 0, i32 0))
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([17 x i8], [17 x i8]* @err_stack, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_call_depth() {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([27 x i8], [27 x i8]* @err_calldepth, i32 0, i32 0))
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([21 x i8], [21 x i8]* @err_calldepth, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }
 
 define internal void @runtime_heap_oob(i64 %addr) {
-  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([24 x i8], [24 x i8]* @err_heap_oob, i32 0, i32 0), i64 %addr)
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([22 x i8], [22 x i8]* @err_heap_oob, i32 0, i32 0), i64 %addr)
+  call void @exit(i64 1)
+  unreachable
+}
+
+define internal void @runtime_io_error() {
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([19 x i8], [19 x i8]* @err_io, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
 }

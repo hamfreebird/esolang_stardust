@@ -117,8 +117,8 @@ fn detect_mode(input: &str) -> InputMode {
     if trimmed.is_empty() {
         return InputMode::Shorthand;
     }
-    match trimmed.chars().next().unwrap() {
-        'a'..='z' | 'A'..='Z' | '"' => InputMode::Shorthand,
+    match trimmed.chars().next() {
+        Some('a'..='z') | Some('A'..='Z') | Some('"') => InputMode::Shorthand,
         _ => InputMode::Raw,
     }
 }

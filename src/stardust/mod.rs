@@ -11,8 +11,9 @@ pub mod parser;
 pub mod utils;
 pub mod vm;
 
-/// 最大调用深度 — 防止无限递归
-pub const MAX_CALL_DEPTH: usize = 256;
+// 注意：调用深度上限由 `VmConfig::max_call_depth` / `CodeGenConfig::max_call_depth`
+// 控制（默认 256），可经 `#[max_call_depth=N]` 注解覆盖。
+// 早期这里还有一个 MAX_CALL_DEPTH 常量，但从未被读取，留着只会误导。
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum TokenType {
@@ -285,7 +286,7 @@ impl Default for InstrMeta {
 pub enum ErrorKind {
     InvalidCharacter { ch: char },
     NonSymbolicCharacter,
-    TrailingSpaces,
+    TrailingSpaces, // 保留：词法器目前不产生此错误（行尾空格被静默忽略）
     UnexpectedToken { expected: String, found: String },
     DuplicateMark { name: usize },
     DuplicateFunction { name: usize },

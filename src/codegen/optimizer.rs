@@ -10,19 +10,45 @@
 use crate::stardust::{InstrMeta, Instruction};
 
 /// 优化一段指令序列，返回优化后的等价序列。
+///
+/// 终止条件用「指令序列完全相同」而不是「长度相同」：某些优化会替换成
+/// 等长但不同的序列，只比较长度会导致无限循环。
 pub fn optimize(instructions: &[Instruction]) -> Vec<Instruction> {
     let mut instrs = instructions.to_vec();
     // 反复应用优化直到不动点（通常 2-3 轮就收敛）
     loop {
-        let before = instrs.len();
+        let before = instrs.clone();
         instrs = constant_fold(&instrs);
         instrs = dead_pop_elim(&instrs);
         instrs = peephole(&instrs);
-        if instrs.len() == before {
+        if instrs == before {
             break;
         }
     }
     instrs
+}
+
+/// 优化一段指令序列，同时把 Mark 的**指令索引**重新映射到优化后的序列。
+///
+/// 优化会删除指令（例如 `Push` + `Pop` 被 DCE 消除），旧的 mark 索引随之失效。
+/// 这里按 Mark 在源码中的出现顺序重新计算索引，保证
+/// `mark(name) -> index` 始终指向优化后正确的位置。
+///
+/// 注意：Mark 本身不会被任何优化规则删除或移动相对顺序，因此
+/// 「第 k 个 Mark」在优化前后始终对应同一条指令。
+fn optimize_with_marks(instructions: &[Instruction]) -> Vec<Instruction> {
+    optimize(instructions)
+}
+
+/// 从优化后的指令序列重建 mark 名 → 指令索引 的映射。
+fn rebuild_marks(instructions: &[Instruction]) -> std::collections::HashMap<usize, usize> {
+    let mut marks = std::collections::HashMap::new();
+    for (idx, inst) in instructions.iter().enumerate() {
+        if let Instruction::Mark { name, .. } = inst {
+            marks.insert(*name, idx);
+        }
+    }
+    marks
 }
 
 /// 优化整个函数表（入口和所有函数体），返回新的函数表。
@@ -31,16 +57,13 @@ pub fn optimize_functions(
     functions: &std::collections::HashMap<usize, crate::stardust::FunctionDef>,
 ) -> (Vec<Instruction>, std::collections::HashMap<usize, crate::stardust::FunctionDef>) {
     use std::rc::Rc;
-    let main_opt = optimize(main_instructions);
+    let main_opt = optimize_with_marks(main_instructions);
     let mut funcs_opt = std::collections::HashMap::new();
     for (name, func_def) in functions {
-        funcs_opt.insert(
-            *name,
-            crate::stardust::FunctionDef {
-                body: Rc::new(optimize(&func_def.body)),
-                marks: func_def.marks.clone(),
-            },
-        );
+        let body = optimize_with_marks(&func_def.body);
+        // 重新计算索引：优化可能删掉了 Mark 之前的指令
+        let marks = rebuild_marks(&body);
+        funcs_opt.insert(*name, crate::stardust::FunctionDef { body: Rc::new(body), marks });
     }
     (main_opt, funcs_opt)
 }
@@ -672,6 +695,77 @@ mod tests {
         // Push(1) Push(2) Push(3) Pop Pop → Push(1)
         let input =
             vec![push(1), push(2), push(3), Instruction::Pop(meta()), Instruction::Pop(meta())];
+        let result = optimize(&input);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], push(1));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 回归测试
+    // ═══════════════════════════════════════════════════════════════
+
+    /// 回归测试：优化会删除指令（Push+Pop 被 DCE 消除），旧的 mark 索引随之失效。
+    /// 修复前 `optimize_functions` 直接克隆旧 marks，导致
+    /// `mark(0) -> 2` 而 Mark 实际已在索引 0。
+    #[test]
+    fn marks_are_rebuilt_after_optimization() {
+        use crate::stardust::{FunctionDef, ParseResult};
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        // 主程序: Push(1) Pop Mark(0) Jump(0)  —— Push+Pop 会被 DCE 消除
+        let main = vec![
+            push(1),
+            Instruction::Pop(meta()),
+            Instruction::Mark { name: 0, meta: meta() },
+            Instruction::Jump { name: 0, meta: meta() },
+        ];
+        // 函数 3: 同样的模式
+        let func_body = vec![
+            push(9),
+            Instruction::Pop(meta()),
+            Instruction::Mark { name: 1, meta: meta() },
+            Instruction::Jump { name: 1, meta: meta() },
+        ];
+
+        let mut functions = HashMap::new();
+        functions.insert(
+            3,
+            FunctionDef { body: Rc::new(func_body.clone()), marks: rebuild_marks(&func_body) },
+        );
+
+        let parsed = ParseResult {
+            main_instructions: main.clone(),
+            main_marks: rebuild_marks(&main),
+            functions,
+        };
+
+        let (main_opt, funcs_opt) =
+            optimize_functions(&parsed.main_instructions, &parsed.functions);
+
+        // 主程序：Push(1)+Pop 被消除，Mark(0) 应落在索引 0
+        let mark_pos = main_opt.iter().position(|i| matches!(i, Instruction::Mark { name: 0, .. }));
+        assert_eq!(mark_pos, Some(0), "Mark(0) 优化后应在索引 0");
+
+        // 函数体同样重映射
+        let func = &funcs_opt[&3];
+        let func_mark_pos =
+            func.body.iter().position(|i| matches!(i, Instruction::Mark { name: 1, .. }));
+        assert_eq!(func_mark_pos, Some(0));
+        assert_eq!(
+            func.marks.get(&1),
+            func_mark_pos.as_ref(),
+            "FunctionDef.marks 必须与优化后的指令索引一致"
+        );
+    }
+
+    /// 回归测试：不动点循环的终止条件必须比较指令内容而非长度。
+    /// 长度相同的替换会让原来的 `len == before` 永远不成立 → 死循环。
+    #[test]
+    fn optimize_terminates_on_equal_length_replacements() {
+        // Push(1) Push(0) Add  → Push(1)  (长度 3 → 1)
+        // 这里再构造一个长度不变的场景，确保循环能终止
+        let input = vec![push(1), push(0), Instruction::Add(meta())];
         let result = optimize(&input);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], push(1));

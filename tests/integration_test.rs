@@ -141,6 +141,41 @@ fn parse(source: &str) -> Result<esolang_stardust::stardust::ParseResult, Stardu
     parse_program(tokens)
 }
 
+/// 捕获 stdout 的 I/O 桩。
+///
+/// 大多数集成测试用 `vm.run()`（StdIO）并只断言 `is_ok()` / `ErrorKind`，
+/// 无法验证程序**实际输出了什么**。需要断言输出时用这个桩配合
+/// `VM::run_with_io`。
+#[derive(Default)]
+struct TestIO {
+    output: String,
+    /// 依次提供的输入（NumIn / CharIn）
+    input: Vec<i64>,
+}
+
+impl esolang_stardust::stardust::vm::VmIO for TestIO {
+    fn write_char(&mut self, ch: char) -> std::io::Result<()> {
+        self.output.push(ch);
+        Ok(())
+    }
+    fn read_char(&mut self) -> std::io::Result<u8> {
+        self.input
+            .first()
+            .map(|v| *v as u8)
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no input"))
+    }
+    fn write_num(&mut self, n: i64) -> std::io::Result<()> {
+        self.output.push_str(&n.to_string());
+        Ok(())
+    }
+    fn read_num(&mut self) -> std::io::Result<i64> {
+        if self.input.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no input"));
+        }
+        Ok(self.input.remove(0))
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 1. 空程序和最小程序
 // ════════════════════════════════════════════════════════════════════════════
@@ -417,6 +452,139 @@ fn push_and_add_sequence() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// 8b. 回归测试：曾经静默改变语义的缺陷
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn comment_between_lines_does_not_accumulate_spaces() {
+    // 回归测试：词法器曾在注释后不重置空格计数，
+    // 导致 "   // c\n   +" 的 spaces 变成 6，Rotate 被静默解释成 Push(1)。
+    use esolang_stardust::stardust::lexer::tokenize;
+
+    let tokens = tokenize("   // c\n   +").unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].spaces, 3, "空格数不得跨行/跨注释累加");
+
+    // 端到端：同样的指令序列，有无注释必须产生同样的栈效果
+    let body = format!("{}{}{}   +...", push(1), push(2), push(3));
+    let with_comment = format!("// header comment\n{body}");
+    let a = tokenize(&body).unwrap();
+    let b = tokenize(&with_comment).unwrap();
+    let spaces_a: Vec<_> = a.iter().map(|t| t.spaces).collect();
+    let spaces_b: Vec<_> = b.iter().map(|t| t.spaces).collect();
+    assert_eq!(spaces_a, spaces_b, "加注释不得改变任何指令的空格数");
+    assert!(run(&with_comment).is_ok());
+}
+
+#[test]
+fn stardust_conversion_handles_ascii_punctuation() {
+    // 回归测试：--stardust 过去只转换字母数字，标点原样保留，
+    // 生成的源码无法通过词法分析（invalid character '!'）。
+    use esolang_stardust::stardust::utils::compile_file_to_stardust;
+
+    let dir = std::env::temp_dir();
+    let uid = std::process::id();
+    let input = dir.join(format!("sd_conv_{uid}.txt"));
+    let output = dir.join(format!("sd_conv_{uid}.sd"));
+    std::fs::write(&input, "Hello, World! (v2)\n").unwrap();
+
+    compile_file_to_stardust(input.to_str().unwrap(), Some(output.to_str().unwrap())).unwrap();
+    let generated = std::fs::read_to_string(&output).unwrap();
+    let _ = std::fs::remove_file(&input);
+    let _ = std::fs::remove_file(&output);
+
+    // 生成的源码必须能被完整流水线处理
+    let tokens = tokenize(&generated).unwrap();
+    assert!(!tokens.is_empty(), "生成的源码应至少产生一个 token");
+    let parsed = parse_program(tokens).unwrap();
+    // 每个字符都转成了 Push + CharOut
+    assert!(parsed.main_instructions.len() >= "Hello, World! (v2)".len() * 2);
+    assert!(run(&generated).is_ok(), "生成的源码应可执行");
+}
+
+#[test]
+fn readme_arithmetic_example_runs() {
+    // 回归测试：readme 的 "1+2+3+4+5=15" 示例曾被换成一段无法运行的斐波那契代码。
+    // 这里把示例钉进测试，防止文档再次腐化。
+    // 语法：Push(1) Push(2) Add Push(3) Add Push(4) Add Push(5) Add NumOut → 15
+    let src = [push(1), push(2), add(), push(3), add(), push(4), add(), push(5), add(), num_out()]
+        .concat();
+
+    // 用 TestIO 捕获输出，断言结果确实是 15
+    let mut io = TestIO::default();
+    let parsed = parse_program(tokenize(&src).unwrap()).unwrap();
+    let mut vm = VM::new(parsed, VmConfig::default());
+    vm.run_with_io(&mut io).unwrap();
+    assert_eq!(io.output, "15", "readme 中的算术示例应输出 15");
+}
+
+#[test]
+fn numin_reads_from_injected_input() {
+    // NumIn NumOut：回显读到的整数（同时验证 TestIO 的输入注入可用）
+    let src = format!("{}{}", " .", num_out());
+    let mut io = TestIO { output: String::new(), input: vec![42] };
+
+    let parsed = parse_program(tokenize(&src).unwrap()).unwrap();
+    let mut vm = VM::new(parsed, VmConfig::default());
+    vm.run_with_io(&mut io).unwrap();
+    assert_eq!(io.output, "42", "NumIn 应读到 42 并由 NumOut 原样输出");
+}
+
+#[test]
+fn charin_reads_byte_from_injected_input() {
+    // CharIn CharOut：读入字符码并回显
+    let src = format!("{}{}", " ,", char_out());
+    let mut io = TestIO { output: String::new(), input: vec![b'A' as i64] };
+
+    let parsed = parse_program(tokenize(&src).unwrap()).unwrap();
+    let mut vm = VM::new(parsed, VmConfig::default());
+    vm.run_with_io(&mut io).unwrap();
+    assert_eq!(io.output, "A");
+}
+
+#[test]
+fn recursive_self_call_parses() {
+    // 回归测试：函数体内调用**同名**函数时，调用语句的 `:` 此前会被
+    // 误判为函数声明的结束标记，导致递归函数无法解析
+    // （readme 的旧斐波那契示例即因此失败）。
+    use esolang_stardust::stardust::Instruction;
+
+    // 函数 1: ` :`  Mark(2)  Dup Push(0) Eq  Jump(2)  ...  ` : ;` 递归调用自身  ` :`
+    let bt = "`".to_string();
+    let src = [
+        " :".to_string(),  // 函数 1 声明开始
+        format!("  {bt}"), // Mark(2)
+        " +".to_string(),  // Dup
+        push(0),
+        " =".to_string(),   // Eq
+        "  '".to_string(),  // Jump(2)
+        " : ;".to_string(), // 递归调用函数 1（0 参数）
+        " :".to_string(),   // 函数 1 声明结束
+    ]
+    .concat();
+    let parsed = parse_program(tokenize(&src).unwrap()).unwrap();
+    let body = parsed.functions.get(&1).expect("function 1 should be defined");
+    assert!(
+        body.body.iter().any(|i| matches!(i, Instruction::Call { name: 1, .. })),
+        "函数体应包含对自身的递归调用"
+    );
+}
+
+#[test]
+fn annotations_do_not_shift_source_line_numbers() {
+    // 回归测试：parse_config 过去用 "非空才加换行" 的拼接策略，
+    // 首行为空/注解时后续行号整体前移，错误定位全部错位。
+    use esolang_stardust::stardust::config::parse_config;
+
+    let source = "\n#[max_steps=500]\n\n     +\n";
+    let (cfg, clean) = parse_config(source).unwrap();
+    assert_eq!(cfg.max_steps, Some(500));
+
+    let tokens = tokenize(&clean).unwrap();
+    assert_eq!(tokens[0].line, 4, "清洗后行号必须与源码保持一致");
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // 9. VM 错误处理
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -496,7 +664,7 @@ fn parse_error_duplicate_function() {
 #[test]
 fn parse_error_unclosed_function() {
     // (1): Push(0)  — 没有结束的 (1):
-    let src = format!("{}:{}", " ".repeat(1), push(0));
+    let src = format!(" {}:{}", "", push(0));
     let e = run(&src).unwrap_err();
     assert_eq!(e.kind, ErrorKind::UnclosedFunction { name: 1 });
 }
@@ -1105,5 +1273,101 @@ mod codegen_tests {
         let content = std::fs::read_to_string(&tmp).unwrap();
         assert!(content.contains("putchar"));
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// 把 IR 交给 clang 做完整解析+代码生成（`-c -o /dev/null`），验证 IR 合法。
+    /// 不链接、不运行；返回 clang 的 stderr，成功时为空。
+    fn validate_ir(ir: &str) -> Result<(), String> {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let ll_path =
+            std::env::temp_dir().join(format!("sd_verify_{}_{}.ll", std::process::id(), n));
+        std::fs::write(&ll_path, ir).map_err(|e| e.to_string())?;
+        let ll_str = ll_path.to_str().ok_or("non-utf8 temp path")?.to_string();
+        let out = Command::new("clang")
+            .args(["-c", "-o", "/dev/null", "-Wno-override-module", &ll_str])
+            .output()
+            .map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&ll_path);
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).to_string())
+        }
+    }
+
+    /// 回归护栏：历史上 Reverse / Pick 生成了重复定义 SSA 名的非法 IR，
+    /// DumpStack / DumpState 引用了从未定义的 @fprintf_stderr —— 而当时
+    /// codegen 的单元测试只做 `ir.contains("@malloc")` 这类字符串断言，
+    /// 全部照常通过。这里改为真正调用 clang 校验 IR。
+    #[test]
+    fn every_single_instruction_produces_valid_ir() {
+        // 每条指令各自构造成最小程序，确保编译路径被真实走到
+        let cases: Vec<(&str, String)> = vec![
+            ("Reverse", format!("{}{}{}     *...", push(1), push(2), push(3))),
+            ("Pick", format!("{}{}{}    +  <...", push(1), push(2), push(3))),
+            ("ShiftL", format!("{}{}{}<...", push(1), push(2), push(3))),
+            ("ShiftR", format!("{}{}{}>...", push(1), push(2), push(3))),
+            ("DropN", format!("{}{}{}   + >..", push(1), push(2), push(3))),
+            ("Depth", format!("{}{} <...", push(1), push(2))),
+            ("Rotate", format!("{}{}{}   +...", push(1), push(2), push(3))),
+            ("Swap", format!("{}{}  +...", push(1), push(2))),
+            ("Dup", format!("{} +...", push(1))),
+            ("Pop", format!("{}{}    +...", push(1), push(2))),
+            ("DumpStack", format!("{}#", push(7))),
+            ("DumpState", format!("{} #", push(7))),
+            ("Breakpoint", format!("{}  #.", push(7))),
+            ("Store/Load", format!("{}{}-{} -.", push(5), push(9), push(9))),
+            ("NumIn", " .".to_string()),
+            ("CharIn", " ,".to_string()),
+            ("Div/Mod", format!("{}{}   *.{}{}    *.", push(9), push(2), push(9), push(2))),
+            ("Eq/Ne/Lt/Gt", format!("{}{}=.{}{} =.", push(1), push(2), push(1), push(2))),
+            ("Le/Ge", format!("{}{}    =.", push(1), push(2))),
+            ("And/Or/Not/Xor", format!("{}{}&.{}{} &.", push(1), push(1), push(0), push(1))),
+        ];
+
+        for (name, src) in cases {
+            let ir = compile_src_to_ir(&src);
+            if let Err(stderr) = validate_ir(&ir) {
+                panic!("`{name}` 生成了非法 LLVM IR:\n{stderr}");
+            }
+        }
+    }
+
+    #[test]
+    fn deep_expression_program_produces_valid_ir() {
+        // 覆盖 BB 边界上的 pop_ssa 回退路径（会从 @stack 加载并做下溢检查）
+        // 无条件跳转跨越基本块，强制编译器走 flush/flush-after-mark 路径
+        // Mark(n) = n 个空格 + 反引号；UncondJump(n) = n 个空格 + ~
+        let bt = "`".to_string();
+        // Push(1) Push(2) Push(3) Mark(0) UncondJump(1) Mark(1) Push(4) Push(5) NumOut x5
+        let src = [
+            push(1),
+            push(2),
+            push(3),
+            bt.clone(),       // Mark(0)
+            " ~".to_string(), // UncondJump(1)
+            format!(" {bt}"), // Mark(1)
+            push(4),
+            push(5),
+            ".....".to_string(),
+        ]
+        .concat();
+        let ir = compile_src_to_ir(&src);
+        if let Err(stderr) = validate_ir(&ir) {
+            panic!("跨基本块程序生成了非法 LLVM IR:\n{stderr}");
+        }
+    }
+
+    #[test]
+    fn function_program_produces_valid_ir() {
+        // 函数声明 + 调用（含 frame_base_stack 的跨帧访问）
+        // 语法: ` :` <body> ` :` 声明函数 1；` :;` 调用函数 1（0 参数）
+        let src = format!(" :{} , : :;", push(65));
+        let ir = compile_src_to_ir(&src);
+        if let Err(stderr) = validate_ir(&ir) {
+            panic!("函数程序生成了非法 LLVM IR:\n{stderr}");
+        }
     }
 }

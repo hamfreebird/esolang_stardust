@@ -85,6 +85,21 @@ impl VmSnapshot {
     }
 }
 
+impl VM {
+    /// 当前帧（栈顶帧）。
+    ///
+    /// `frames` 恒非空的不变式由 `VM::new` 建立：构造时压入主帧，
+    /// 而 `run_with_io` 只在 `frames.len() == 1` 时弹出（即不会弹出最后一个帧）。
+    /// 这里用 `expect` 把该不变式写成显式契约，取代散落的 `unwrap()`。
+    fn top_frame(&self) -> &CallFrame {
+        self.frames.last().expect("VM frames invariant: main frame is never popped")
+    }
+
+    fn top_frame_mut(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().expect("VM frames invariant: main frame is never popped")
+    }
+}
+
 /// 在指定帧中执行单条指令
 ///
 /// 返回 `Ok(Some(...))` 表示遇到 Call 指令，调用者需压入新帧。
@@ -442,29 +457,28 @@ impl VM {
 
         while !self.halted {
             // ── 步数限制检查 ─────────────────────────────
-            if let Some(limit) = self.config.max_steps {
-                if steps >= limit {
-                    let mut snap = VmSnapshot::from_vm(self);
-                    snap.steps_executed = steps;
-                    return Err(StardustError::new(
-                        ErrorKind::StepLimitExceeded { steps: limit },
-                        None,
-                    ));
-                }
+            if let Some(limit) = self.config.max_steps
+                && steps >= limit
+            {
+                // 注意：不要在这里构造 VmSnapshot —— 它会深拷贝所有帧的栈
+                // 和整个堆，而快照在返回错误后就被丢弃，属于纯粹的无谓开销。
+                return Err(StardustError::new(
+                    ErrorKind::StepLimitExceeded { steps: limit },
+                    None,
+                ));
             }
             steps += 1;
 
             // ── 时间限制检查（每 1000 步检查一次）───────
-            if steps % 1000 == 0 {
-                if let Some(limit_secs) = self.config.time_limit_secs {
-                    if start_time.elapsed().as_secs() >= limit_secs {
-                        return Err(StardustError::new(ErrorKind::TimeLimitExceeded, None));
-                    }
-                }
+            if steps.is_multiple_of(1000)
+                && let Some(limit_secs) = self.config.time_limit_secs
+                && start_time.elapsed().as_secs() >= limit_secs
+            {
+                return Err(StardustError::new(ErrorKind::TimeLimitExceeded, None));
             }
 
             let frame_done = {
-                let frame = self.frames.last().unwrap();
+                let frame = self.top_frame();
                 frame.pc >= frame.instructions.len()
             };
 
@@ -472,8 +486,10 @@ impl VM {
                 if self.frames.len() == 1 {
                     break;
                 }
-                let finished = self.frames.pop().unwrap();
-                let parent = self.frames.last_mut().unwrap();
+                let finished =
+                    self.frames.pop().expect("frames.len() > 1 guarantees a frame to pop");
+                let parent =
+                    self.frames.last_mut().expect("popping from >=2 frames always leaves a parent");
                 parent.stack.extend(finished.stack);
                 parent.pc = finished.ret_pc;
                 continue;
@@ -482,7 +498,7 @@ impl VM {
             // ── 读取下一条指令（使用引用，消除 clone）─────
             let should_break = match &self.debug {
                 Some(dbg) => {
-                    let frame = self.frames.last().unwrap();
+                    let frame = self.top_frame();
                     dbg.should_break(frame.pc, &frame.marks, &frame.instructions[frame.pc])
                 }
                 None => false,
@@ -508,7 +524,10 @@ impl VM {
 
             // ── 执行指令（Rc 共享，零 clone）──────────────
             let call_info = {
-                let frame = self.frames.last_mut().unwrap();
+                let frame = self
+                    .frames
+                    .last_mut()
+                    .expect("VM frames invariant: main frame is never popped");
                 // 克隆 Rc（仅引用计数增减），解除对 frame 的借用
                 let inst_rc = Rc::clone(&frame.instructions);
                 let pc = frame.pc;
@@ -551,7 +570,7 @@ impl VM {
 
         // 从当前帧弹出参数
         let (args, ret_pc) = {
-            let frame = self.frames.last().unwrap();
+            let frame = self.top_frame();
 
             if frame.stack.len() < argc {
                 return Err(StardustError::new(
@@ -566,16 +585,13 @@ impl VM {
 
             let stack = &frame.stack;
             let start = stack.len() - argc;
-            let mut popped = Vec::with_capacity(argc);
-            for i in start..stack.len() {
-                popped.push(stack[i]);
-            }
+            let popped = stack[start..].to_vec();
             (popped, frame.pc)
         };
 
         // 真正弹出
         {
-            let frame = self.frames.last_mut().unwrap();
+            let frame = self.top_frame_mut();
             for _ in 0..argc {
                 frame.stack.pop();
             }

@@ -44,6 +44,9 @@ struct FuncCompiler<'a> {
     current_func: Option<usize>,
     /// 当前是否在基本块起始位置（刚经过 label，需要从 @stack 加载）
     at_bb_start: bool,
+    /// 当前基本块是否已有终结指令（br/ret/switch…）。
+    /// LLVM 要求每个块以终结指令结束，打开新块时必须先补齐。
+    block_terminated: bool,
     /// 当前栈深度（用于追踪 flush/reload 位置）
     tracked_depth: usize,
 }
@@ -57,6 +60,7 @@ impl<'a> FuncCompiler<'a> {
             compile_stack: Vec::new(),
             current_func: None,
             at_bb_start: true,
+            block_terminated: false,
             tracked_depth: 0,
         }
     }
@@ -68,6 +72,30 @@ impl<'a> FuncCompiler<'a> {
         if !ir.ends_with('\n') {
             self.output.push('\n');
         }
+        // 跟踪终结指令：所有以 br/ret/switch/resume/unreachable 结尾的指令
+        let trimmed = ir.trim();
+        if trimmed.starts_with("br ")
+            || trimmed.starts_with("ret ")
+            || trimmed.starts_with("switch ")
+            || trimmed.starts_with("indirectbr ")
+            || trimmed.starts_with("resume ")
+            || trimmed == "unreachable"
+        {
+            self.block_terminated = true;
+        }
+    }
+
+    /// 打开一个新的基本块标签。
+    ///
+    /// 若当前块尚未终结（LLVM 不允许），先补一条跳转到该新标签的 `br`。
+    /// 这保证了 `flush()` 之后紧跟 `mark_N:` 这类序列能生成合法 IR。
+    fn emit_label(&mut self, label: &str) {
+        if !self.block_terminated {
+            self.emitln(&format!("  br label %{label}"));
+        }
+        self.emitln(&format!("{label}:"));
+        self.block_terminated = false;
+        self.at_bb_start = true;
     }
 
     fn next_label(&mut self) -> usize {
@@ -99,8 +127,30 @@ impl<'a> FuncCompiler<'a> {
         let sp_dec = format!("%sp_dec_{l}");
         let ptr = format!("%ptr_{l}");
         let val = format!("%val_{l}");
+        let max_depth = self.config.max_call_depth;
 
         self.emitln(&format!("  %sp_pre_{l} = load i64, i64* @sp", l = l));
+
+        // 栈下溢检查：@sp 必须严格大于当前帧基址，否则栈已空，
+        // 继续加载会读到未初始化的内存（未定义行为）。
+        self.emitln(&format!("  %suf_fbd_{l} = load i32, i32* @frame_depth", l = l));
+        self.emitln(&format!("  %suf_fbd_d_{l} = sub i32 %suf_fbd_{l}, 1", l = l));
+        self.emitln(&format!(
+            "  %suf_fb_gep_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %suf_fbd_d_{l}",
+            MD = max_depth,
+            l = l
+        ));
+        self.emitln(&format!("  %suf_fb_{l} = load i64, i64* %suf_fb_gep_{l}", l = l));
+        self.emitln(&format!("  %suf_ok_{l} = icmp sgt i64 %sp_pre_{l}, %suf_fb_{l}", l = l));
+        self.emitln(&format!(
+            "  br i1 %suf_ok_{l}, label %suf_ok_blk_{l}, label %suf_err_blk_{l}",
+            l = l
+        ));
+        self.emit_label(&format!("suf_err_blk_{l}"));
+        self.emitln("  call void @runtime_stack_underflow()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("suf_ok_blk_{l}"));
+
         self.emitln(&format!("  {sp} = sub i64 %sp_pre_{l}, 1", sp = sp_dec));
         self.emitln(&format!("  store i64 {sp}, i64* @sp", sp = sp_dec));
         self.emitln(&format!(
@@ -143,8 +193,8 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("  ; flush {} stack entries to memory", count));
         self.emitln(&format!("  %sp_flush_{l} = load i64, i64* @sp"));
 
-        for i in 0..count {
-            let val_str = &entries[i];
+        for (i, val_str) in entries.iter().enumerate().take(count) {
+            let val_str = val_str.as_str();
             let ptr = format!("%flush_ptr_{}_{}", l, i);
             let sp_name =
                 if i == 0 { format!("%sp_flush_{l}") } else { format!("%sp_flush_{}_{}", l, i) };
@@ -178,6 +228,8 @@ impl<'a> FuncCompiler<'a> {
         }
         self.emitln(&format!("  store i64 %sp_flush_done_{l}, i64* @sp"));
 
+        // 结尾的 store 不是终结指令；标记为未终结，
+        // 由下一个 emit_label 自动补上跳转，避免生成非法 IR。
         self.compile_stack.clear();
     }
 
@@ -336,10 +388,10 @@ impl<'a> FuncCompiler<'a> {
 
         self.emitln(&format!("  %div_zero_{l} = icmp eq i64 {b}, 0", l = l, b = b_str));
         self.emitln(&format!("  br i1 %div_zero_{l}, label %div_err_{l}, label %div_ok_{l}"));
-        self.emitln(&format!("div_err_{l}:"));
-        self.emitln(&"  call void @runtime_divzero()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("div_ok_{l}:"));
+        self.emit_label(&format!("div_err_{l}"));
+        self.emitln("  call void @runtime_divzero()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("div_ok_{l}"));
         self.emitln(&format!("  {r} = sdiv i64 {a}, {b}", r = result, a = a_str, b = b_str));
 
         self.push_ssa(StackEntry::Reg(result));
@@ -357,10 +409,10 @@ impl<'a> FuncCompiler<'a> {
 
         self.emitln(&format!("  %mod_zero_{l} = icmp eq i64 {b}, 0", l = l, b = b_str));
         self.emitln(&format!("  br i1 %mod_zero_{l}, label %mod_err_{l}, label %mod_ok_{l}"));
-        self.emitln(&format!("mod_err_{l}:"));
-        self.emitln(&"  call void @runtime_modzero()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("mod_ok_{l}:"));
+        self.emit_label(&format!("mod_err_{l}"));
+        self.emitln("  call void @runtime_modzero()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("mod_ok_{l}"));
         self.emitln(&format!("  {r} = srem i64 {a}, {b}", r = result, a = a_str, b = b_str));
 
         self.push_ssa(StackEntry::Reg(result));
@@ -375,7 +427,7 @@ impl<'a> FuncCompiler<'a> {
 
         // 跳转到准备块
         self.emitln(&format!("  br label %rev_prep_{l}"));
-        self.emitln(&format!("rev_prep_{l}:"));
+        self.emit_label(&format!("rev_prep_{l}"));
 
         // 获取帧基址和栈指针
         self.emitln(&format!("  %sp_rev_{l} = load i64, i64* @sp"));
@@ -392,7 +444,7 @@ impl<'a> FuncCompiler<'a> {
         // 如果 len <= 1，不需要做任何事
         self.emitln(&format!("  %rev_trivial_{l} = icmp sle i64 %rev_len_{l}, 1"));
         self.emitln(&format!("  br i1 %rev_trivial_{l}, label %rev_done_{l}, label %rev_do_{l}"));
-        self.emitln(&format!("rev_do_{l}:"));
+        self.emit_label(&format!("rev_do_{l}"));
 
         // 分配临时缓冲区
         self.emitln(&format!("  %rev_bytes_{l} = mul i64 %rev_len_{l}, 8"));
@@ -411,7 +463,7 @@ impl<'a> FuncCompiler<'a> {
 
         // 反向复制回 @stack: stack[fb + j] = tmp[len - 1 - j]
         self.emitln(&format!("  br label %rev_loop_{l}"));
-        self.emitln(&format!("rev_loop_{l}:"));
+        self.emit_label(&format!("rev_loop_{l}"));
         self.emitln(&format!(
             "  %rev_j_{l} = phi i64 [ 0, %rev_do_{l} ], [ %rev_j_next_{l}, %rev_loop_body_{l} ]"
         ));
@@ -419,10 +471,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!(
             "  br i1 %rev_loop_done_{l}, label %rev_free_{l}, label %rev_loop_body_{l}"
         ));
-        self.emitln(&format!("rev_loop_body_{l}:"));
+        self.emit_label(&format!("rev_loop_body_{l}"));
         // tmp_src_idx = len - 1 - j
-        self.emitln(&format!("  %rev_tmp_src_idx_{l} = sub i64 %rev_len_{l}, 1"));
-        self.emitln(&format!("  %rev_tmp_src_idx_{l} = sub i64 %rev_tmp_src_idx_{l}, %rev_j_{l}"));
+        self.emitln(&format!("  %rev_len_m1_{l} = sub i64 %rev_len_{l}, 1"));
+        self.emitln(&format!("  %rev_tmp_src_idx_{l} = sub i64 %rev_len_m1_{l}, %rev_j_{l}"));
         self.emitln(&format!(
             "  %rev_tmp_src_{l} = getelementptr i64, i64* %rev_tmp_i64_{l}, i64 %rev_tmp_src_idx_{l}"
         ));
@@ -437,10 +489,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("  store i64 %rev_val_{l}, i64* %rev_dst_{l}"));
         self.emitln(&format!("  %rev_j_next_{l} = add i64 %rev_j_{l}, 1"));
         self.emitln(&format!("  br label %rev_loop_{l}"));
-        self.emitln(&format!("rev_free_{l}:"));
+        self.emit_label(&format!("rev_free_{l}"));
         self.emitln(&format!("  call void @free(i8* %rev_tmp_{l})"));
         self.emitln(&format!("  br label %rev_done_{l}"));
-        self.emitln(&format!("rev_done_{l}:"));
+        self.emit_label(&format!("rev_done_{l}"));
     }
 
     // ── CharOut ────────────────────────────────────────────
@@ -455,10 +507,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("  %ch_ok_high_{l} = icmp sle i64 {v}, 127", v = val_str, l = l));
         self.emitln(&format!("  %ch_ok_{l} = and i1 %ch_ok_low_{l}, %ch_ok_high_{l}"));
         self.emitln(&format!("  br i1 %ch_ok_{l}, label %ch_put_{l}, label %ch_bad_{l}"));
-        self.emitln(&format!("ch_bad_{l}:"));
+        self.emit_label(&format!("ch_bad_{l}"));
         self.emitln(&format!("  call void @runtime_bad_ascii(i64 {v})", v = val_str));
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("ch_put_{l}:"));
+        self.emitln("  unreachable");
+        self.emit_label(&format!("ch_put_{l}"));
         self.emitln(&format!("  %ch_trunc_{l} = trunc i64 {v} to i32", v = val_str));
         self.emitln(&format!("  %ch_call_{l} = call i32 @putchar(i32 %ch_trunc_{l})", l = l));
     }
@@ -473,6 +525,16 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         let result = format!("%charin_{l}");
         self.emitln(&format!("  {r} = call i32 @getchar()", r = result));
+        // getchar() 在 EOF 时返回 -1，与解释器的 "failed to fill whole buffer" 行为对齐
+        self.emitln(&format!("  %charin_eof_{l} = icmp eq i32 {r}, -1", r = result));
+        self.emitln(&format!(
+            "  br i1 %charin_eof_{l}, label %charin_err_blk_{l}, label %charin_ok_blk_{l}",
+            l = l
+        ));
+        self.emit_label(&format!("charin_err_blk_{l}"));
+        self.emitln("  call void @runtime_io_error()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("charin_ok_blk_{l}"));
         self.emitln(&format!("  %charin_ext_{l} = sext i32 {r} to i64", r = result));
         self.push_ssa(StackEntry::Reg(format!("%charin_ext_{l}")));
     }
@@ -498,11 +560,23 @@ impl<'a> FuncCompiler<'a> {
         let l = self.next_label();
         // Alloca space for input
         self.emitln(&format!("  %nin_ptr_{l} = alloca i64"));
+        // 先把槽位置零：scanf 未写入时也不会读到垃圾值
+        self.emitln(&format!("  store i64 0, i64* %nin_ptr_{l}", l = l));
         self.emitln(&format!(
             "  %nin_call_{l} = call i32 (i8*, ...) @scanf(i8* getelementptr ([4 x i8], [4 x i8]* @fmt_numin, i32 0, i32 0), i64* %nin_ptr_{l})",
             l = l
         ));
-        self.emitln(&format!("  %nin_val_{l} = load i64, i64* %nin_ptr_{l}"));
+        // scanf 返回已成功赋值的个数；0 或 EOF 均表示读取失败
+        self.emitln(&format!("  %nin_ok_{l} = icmp eq i32 %nin_call_{l}, 1", l = l));
+        self.emitln(&format!(
+            "  br i1 %nin_ok_{l}, label %nin_ok_blk_{l}, label %nin_err_blk_{l}",
+            l = l
+        ));
+        self.emit_label(&format!("nin_err_blk_{l}"));
+        self.emitln("  call void @runtime_io_error()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("nin_ok_blk_{l}"));
+        self.emitln(&format!("  %nin_val_{l} = load i64, i64* %nin_ptr_{l}", l = l));
         self.push_ssa(StackEntry::Reg(format!("%nin_val_{l}")));
     }
 
@@ -513,7 +587,7 @@ impl<'a> FuncCompiler<'a> {
         self.flush();
 
         let label = Self::mark_label(name);
-        self.emitln(&format!("{}:", label));
+        self.emit_label(&label);
 
         self.at_bb_start = true;
     }
@@ -537,7 +611,7 @@ impl<'a> FuncCompiler<'a> {
             f = fallthrough,
             l = l
         ));
-        self.emitln(&format!("{}:", fallthrough));
+        self.emit_label(&fallthrough);
         self.at_bb_start = true;
     }
 
@@ -548,10 +622,11 @@ impl<'a> FuncCompiler<'a> {
         let target = Self::mark_label(name);
         self.emitln(&format!("  br label %{}", target));
 
-        // After unconditional jump, emit a dead block label
+        // 无条件跳转之后的代码不可达。LLVM 要求每个块以终结指令结束，
+        // 因此这里生成一个自跳转的死块（永不执行，仅满足 IR 结构要求）。
         let l = self.next_label();
-        self.emitln(&format!("dead_{}:", l));
-        self.at_bb_start = true;
+        self.emit_label(&format!("dead_{l}"));
+        self.emitln(&format!("  br label %dead_{l}"));
     }
 
     // ── Call ───────────────────────────────────────────────
@@ -573,10 +648,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!(
             "  br i1 %arg_ok_{l}, label %call_args_ok_{l}, label %call_noargs_{l}"
         ));
-        self.emitln(&format!("call_noargs_{l}:"));
-        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("call_args_ok_{l}:"));
+        self.emit_label(&format!("call_noargs_{l}"));
+        self.emitln("  call void @runtime_stack_underflow()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("call_args_ok_{l}"));
 
         // Store frame base
         self.emitln(&format!(
@@ -596,10 +671,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!(
             "  br i1 %depth_ok_{l}, label %call_ok_{l}, label %call_depth_err_{l}"
         ));
-        self.emitln(&format!("call_depth_err_{l}:"));
-        self.emitln(&"  call void @runtime_call_depth()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("call_ok_{l}:"));
+        self.emit_label(&format!("call_depth_err_{l}"));
+        self.emitln("  call void @runtime_call_depth()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("call_ok_{l}"));
         self.emitln(&format!("  store i32 %fbd_next_{l}, i32* @frame_depth"));
 
         // Call the function
@@ -714,10 +789,10 @@ impl<'a> FuncCompiler<'a> {
             l = l
         ));
         self.emitln(&format!("  br i1 %st_ok_{l}, label %st_do_{l}, label %st_err_{l}"));
-        self.emitln(&format!("st_err_{l}:"));
+        self.emit_label(&format!("st_err_{l}"));
         self.emitln(&format!("  call void @runtime_heap_oob(i64 {a})", a = addr_str));
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("st_do_{l}:"));
+        self.emitln("  unreachable");
+        self.emit_label(&format!("st_do_{l}"));
         self.emitln(&format!(
             "  %st_ptr_{l} = getelementptr [{HS} x i64], [{HS} x i64]* @heap, i32 0, i64 {a}",
             HS = self.config.heap_size,
@@ -741,10 +816,10 @@ impl<'a> FuncCompiler<'a> {
             l = l
         ));
         self.emitln(&format!("  br i1 %ld_ok_{l}, label %ld_do_{l}, label %ld_err_{l}"));
-        self.emitln(&format!("ld_err_{l}:"));
+        self.emit_label(&format!("ld_err_{l}"));
         self.emitln(&format!("  call void @runtime_heap_oob(i64 {a})", a = addr_str));
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("ld_do_{l}:"));
+        self.emitln("  unreachable");
+        self.emit_label(&format!("ld_do_{l}"));
         self.emitln(&format!(
             "  %ld_ptr_{l} = getelementptr [{HS} x i64], [{HS} x i64]* @heap, i32 0, i64 {a}",
             HS = self.config.heap_size,
@@ -798,10 +873,10 @@ impl<'a> FuncCompiler<'a> {
         // stack_underflow check
         self.emitln(&format!("  %sl_empty_{l} = icmp eq i64 %sp_sl_{l}, %fb_sl_{l}"));
         self.emitln(&format!("  br i1 %sl_empty_{l}, label %sl_err_{l}, label %sl_ok_{l}"));
-        self.emitln(&format!("sl_err_{l}:"));
-        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("sl_ok_{l}:"));
+        self.emit_label(&format!("sl_err_{l}"));
+        self.emitln("  call void @runtime_stack_underflow()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("sl_ok_{l}"));
         // Read first element
         self.emitln(&format!(
             "  %sl_first_ptr_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %fb_sl_{l}",
@@ -892,15 +967,15 @@ impl<'a> FuncCompiler<'a> {
 
         self.emitln(&format!("  %sp_pk_{l} = load i64, i64* @sp"));
         self.emitln(&format!("  %pk_n_{l} = call i64 @pick_max(i64 {n})", n = n_str, l = l));
-        self.emitln(&format!("  %pk_idx_{l} = sub i64 %sp_pk_{l}, 1"));
-        self.emitln(&format!("  %pk_idx_{l} = sub i64 %pk_idx_{l}, %pk_n_{l}"));
+        self.emitln(&format!("  %pk_sp_m1_{l} = sub i64 %sp_pk_{l}, 1"));
+        self.emitln(&format!("  %pk_idx_{l} = sub i64 %pk_sp_m1_{l}, %pk_n_{l}"));
         // Check bounds
         self.emitln(&format!("  %pk_ge0_{l} = icmp sge i64 %pk_idx_{l}, 0", l = l));
         self.emitln(&format!("  br i1 %pk_ge0_{l}, label %pk_ok_{l}, label %pk_err_{l}"));
-        self.emitln(&format!("pk_err_{l}:"));
-        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("pk_ok_{l}:"));
+        self.emit_label(&format!("pk_err_{l}"));
+        self.emitln("  call void @runtime_stack_underflow()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("pk_ok_{l}"));
         self.emitln(&format!(
             "  %pk_ptr_{l} = getelementptr [{SZ} x i64], [{SZ} x i64]* @stack, i32 0, i64 %pk_idx_{l}",
             SZ = self.config.stack_size,
@@ -926,10 +1001,10 @@ impl<'a> FuncCompiler<'a> {
         self.emitln(&format!("  %sp_dn_{l} = load i64, i64* @sp"));
         self.emitln(&format!("  %dn_ok_{l} = icmp sle i64 %dn_n_{l}, %sp_dn_{l}"));
         self.emitln(&format!("  br i1 %dn_ok_{l}, label %dn_do_{l}, label %dn_err_{l}"));
-        self.emitln(&format!("dn_err_{l}:"));
-        self.emitln(&"  call void @runtime_stack_underflow()".to_string());
-        self.emitln(&"  unreachable".to_string());
-        self.emitln(&format!("dn_do_{l}:"));
+        self.emit_label(&format!("dn_err_{l}"));
+        self.emitln("  call void @runtime_stack_underflow()");
+        self.emitln("  unreachable");
+        self.emit_label(&format!("dn_do_{l}"));
         self.emitln(&format!("  %sp_dn_new_{l} = sub i64 %sp_dn_{l}, %dn_n_{l}"));
         self.emitln(&format!("  store i64 %sp_dn_new_{l}, i64* @sp"));
     }
@@ -942,7 +1017,7 @@ impl<'a> FuncCompiler<'a> {
 
         // Jump to prep
         self.emitln(&format!("  br label %ds_prep_{l}"));
-        self.emitln(&format!("ds_prep_{l}:"));
+        self.emit_label(&format!("ds_prep_{l}"));
 
         // Get frame base and sp
         self.emitln(&format!("  %ds_sp_{l} = load i64, i64* @sp"));
@@ -958,36 +1033,52 @@ impl<'a> FuncCompiler<'a> {
         // Print header to stderr
         self.emitln(&format!("  %ds_fp_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
-            "  %ds_hdr_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp_{l}, i8* getelementptr ([9 x i8], [9 x i8]* @dbg_header, i32 0, i32 0))"
+            "  %ds_hdr_{l} = call i32 (i8*, i8*, ...) @fprintf(i8* %ds_fp_{l}, i8* getelementptr ([17 x i8], [17 x i8]* @dbg_header, i32 0, i32 0))"
         ));
 
         // Loop and print each element: fprintf(stderr, " %ld", val)
         self.emitln(&format!("  br label %ds_loop_hdr_{l}"));
-        self.emitln(&format!("ds_loop_hdr_{l}:"));
+        self.emit_label(&format!("ds_loop_hdr_{l}"));
+        // phi 的回边前驱是循环末尾的块（ds_print_blk），必须与实际跳转来源一致
         self.emitln(&format!(
-            "  %ds_i_{l} = phi i64 [ %ds_fb_{l}, %ds_prep_{l} ], [ %ds_i_next_{l}, %ds_body_{l} ]"
+            "  %ds_i_{l} = phi i64 [ %ds_fb_{l}, %ds_prep_{l} ], [ %ds_i_next_{l}, %ds_print_blk_{l} ]"
         ));
         self.emitln(&format!("  %ds_end_{l} = icmp eq i64 %ds_i_{l}, %ds_sp_{l}"));
         self.emitln(&format!("  br i1 %ds_end_{l}, label %ds_done_{l}, label %ds_body_{l}"));
-        self.emitln(&format!("ds_body_{l}:"));
+        self.emit_label(&format!("ds_body_{l}"));
         self.emitln(&format!(
             "  %ds_ptr_{l} = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %ds_i_{l}",
             SSZ = self.config.stack_size,
             l = l
         ));
         self.emitln(&format!("  %ds_val_{l} = load i64, i64* %ds_ptr_{l}"));
+        // 非首个元素先输出 ", "，使输出格式与解释器的 `{:?}` 一致
+        self.emitln(&format!("  %ds_first_{l} = icmp eq i64 %ds_i_{l}, %ds_fb_{l}", l = l));
+        self.emitln(&format!(
+            "  br i1 %ds_first_{l}, label %ds_nocomma_blk_{l}, label %ds_comma_blk_{l}",
+            l = l
+        ));
+        self.emit_label(&format!("ds_nocomma_blk_{l}"));
+        self.emitln(&format!("  br label %ds_print_blk_{l}", l = l));
+        self.emit_label(&format!("ds_comma_blk_{l}"));
+        self.emitln(&format!("  %ds_fp2a_{l} = call i8* @get_stderr()"));
+        self.emitln(&format!(
+            "  %ds_cma_{l} = call i32 (i8*, i8*, ...) @fprintf(i8* %ds_fp2a_{l}, i8* getelementptr ([3 x i8], [3 x i8]* @dbg_comma, i32 0, i32 0))"
+        ));
+        self.emitln(&format!("  br label %ds_print_blk_{l}", l = l));
+        self.emit_label(&format!("ds_print_blk_{l}"));
         self.emitln(&format!("  %ds_fp2_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
-            "  %ds_pr_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp2_{l}, i8* getelementptr ([4 x i8], [4 x i8]* @dbg_fmt, i32 0, i32 0), i64 %ds_val_{l})"
+            "  %ds_pr_{l} = call i32 (i8*, i8*, ...) @fprintf(i8* %ds_fp2_{l}, i8* getelementptr ([4 x i8], [4 x i8]* @dbg_fmt, i32 0, i32 0), i64 %ds_val_{l})"
         ));
         self.emitln(&format!("  %ds_i_next_{l} = add i64 %ds_i_{l}, 1"));
         self.emitln(&format!("  br label %ds_loop_hdr_{l}"));
-        self.emitln(&format!("ds_done_{l}:"));
+        self.emit_label(&format!("ds_done_{l}"));
 
-        // Print closing newline
+        // Print closing bracket + newline
         self.emitln(&format!("  %ds_fp3_{l} = call i8* @get_stderr()"));
         self.emitln(&format!(
-            "  %ds_nl_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %ds_fp3_{l}, i8* getelementptr ([2 x i8], [2 x i8]* @dbg_nl, i32 0, i32 0))"
+            "  %ds_nl_{l} = call i32 (i8*, i8*, ...) @fprintf(i8* %ds_fp3_{l}, i8* getelementptr ([3 x i8], [3 x i8]* @dbg_close, i32 0, i32 0))"
         ));
     }
 
@@ -995,12 +1086,22 @@ impl<'a> FuncCompiler<'a> {
         self.flush();
         let l = self.next_label();
 
-        self.emitln(&"  ; DumpState: print VM state to stderr".to_string());
+        self.emitln("  ; DumpState: print VM state to stderr");
         self.emitln(&format!("  %dss_sp_{l} = load i64, i64* @sp"));
         self.emitln(&format!("  %dss_fbd_{l} = load i32, i32* @frame_depth"));
         self.emitln(&format!("  %dss_fp_{l} = call i8* @get_stderr()"));
+        // 栈深 = @sp - 帧基址（与解释器的 frame.stack.len() 等价）
+        self.emitln(&format!("  %dss_fbd_d_{l} = sub i32 %dss_fbd_{l}, 1", l = l));
         self.emitln(&format!(
-            "  %dss_{l} = call i32 (i8*, i8*, ...) @fprintf_stderr(i8* %dss_fp_{l}, i8* getelementptr ([31 x i8], [31 x i8]* @dbg_state_fmt, i32 0, i32 0), i64 %dss_sp_{l}, i32 %dss_fbd_{l})",
+            "  %dss_fb_gep_{l} = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %dss_fbd_d_{l}",
+            MD = self.config.max_call_depth,
+            l = l
+        ));
+        self.emitln(&format!("  %dss_fb_{l} = load i64, i64* %dss_fb_gep_{l}", l = l));
+        self.emitln(&format!("  %dss_depth_{l} = sub i64 %dss_sp_{l}, %dss_fb_{l}", l = l));
+        self.emitln(&format!("  %dss_hu_{l} = load i64, i64* @heap_used", l = l));
+        self.emitln(&format!(
+            "  %dss_{l} = call i32 (i8*, i8*, ...) @fprintf(i8* %dss_fp_{l}, i8* getelementptr ([46 x i8], [46 x i8]* @dbg_state_fmt, i32 0, i32 0), i64 %dss_sp_{l}, i64 %dss_depth_{l}, i64 %dss_hu_{l})",
             l = l
         ));
     }
@@ -1046,14 +1147,14 @@ target triple = "x86_64-unknown-linux-gnu"
     out.push_str("declare void @llvm.memmove.p0.p0.i64(i64*, i64*, i64, i1)\n");
 
     // ── stderr 辅助 ──
+    // 使用 C 运行时的全局 stderr 符号。
+    // 旧实现用 fdopen(2, "w") 现场创建流，每次调用都会泄漏一个 FILE*。
     out.push_str(
         r#"
-declare i8* @fdopen(i32, i8*)
-declare i32 @fprintf_stderr(i8*, i8*, ...)
-@mode_w = private constant [2 x i8] c"w\00"
+@stderr = external global i8*
 
 define internal i8* @get_stderr() {
-  %fp = call i8* @fdopen(i32 2, i8* getelementptr ([2 x i8], [2 x i8]* @mode_w, i32 0, i32 0))
+  %fp = load i8*, i8** @stderr
   ret i8* %fp
 }
 
@@ -1082,10 +1183,11 @@ ret_n:
 
 ; ── 调试字符串 ──
 @stderr_fmt = private constant [4 x i8] c"%s\0A\00"
-@dbg_header = private constant [9 x i8] c"[DEBUG] \00"
-@dbg_fmt = private constant [5 x i8] c" %ld\00"
-@dbg_nl = private constant [2 x i8] c"\0A\00"
-@dbg_state_fmt = private constant [32 x i8] c"[DEBUG] sp=%ld, frame_depth=%d\0A\00"
+@dbg_header = private constant [17 x i8] c"[DEBUG] Stack: [\00"
+@dbg_comma = private constant [3 x i8] c", \00"
+@dbg_fmt = private constant [4 x i8] c"%ld\00"
+@dbg_close = private constant [3 x i8] c"]\0A\00"
+@dbg_state_fmt = private constant [46 x i8] c"[DEBUG] sp=%ld, StackDepth=%ld, HeapSize=%ld\0A\00"
 
 
 "#,

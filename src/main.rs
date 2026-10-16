@@ -8,7 +8,7 @@ use esolang_stardust::stardust::parser::parse_program;
 use esolang_stardust::stardust::utils::{
     bump_source, compile_file_to_stardust, print_error, print_usage,
 };
-use esolang_stardust::stardust::{StardustError, VM};
+use esolang_stardust::stardust::{ErrorKind, StardustError, VM};
 use std::{env, fs, process};
 
 fn main() {
@@ -63,10 +63,12 @@ fn stardust(args: Vec<String>) {
     }
 }
 
-/// 获取源文件的 unwinded 源码（预处理后）
+/// 获取源文件的 unwinded 源码（剥离注解并预处理后）
 fn read_and_unwind(filename: &str) -> Result<(String, String), StardustError> {
     let source = fs::read_to_string(filename)?;
-    let unwind_source = simple_preprocess(&source)?.into_owned();
+    let (_config, clean_source) = parse_config(&source)
+        .map_err(|e| StardustError::new(ErrorKind::ParseChar, None).with_message(e.to_string()))?;
+    let unwind_source = simple_preprocess(&clean_source)?.into_owned();
     Ok((source, unwind_source))
 }
 
@@ -164,10 +166,15 @@ fn cmd_tokens(args: &[String]) {
         }
     };
 
+    // serde_json::to_string 对本结构体只会因 I/O 失败而报错，
+    // 而这里写的是内存字符串；仍显式处理以避免 panic。
     let json = serde_json::to_string(&serde_json::json!({
         "tokens": tokens,
     }))
-    .unwrap();
+    .unwrap_or_else(|e| {
+        eprintln!("JSON serialization error: {}", e);
+        process::exit(1);
+    });
 
     println!("{}", json);
     process::exit(0);
@@ -249,7 +256,10 @@ fn cmd_build(args: &[String]) {
     }
 }
 
-/// 完整的解析流水线（预处理 → 词法 → 语法），出错时打印并退出
+/// 完整的解析流水线（配置提取 → 预处理 → 词法 → 语法），出错时打印并退出
+///
+/// 与 `cmd_run` 保持一致：先剥离 `#[key=value]` 注解，否则注解里的 `[`
+/// 会被词法分析器判为非法字符。
 fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
     let source = match fs::read_to_string(filename) {
         Ok(content) => content,
@@ -259,7 +269,15 @@ fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
         }
     };
 
-    let unwind_source = match simple_preprocess(&source) {
+    let (_config, clean_source) = match parse_config(&source) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Config error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let unwind_source = match simple_preprocess(&clean_source) {
         Ok(uw) => uw,
         Err(e) => {
             print_error(&e, &source, filename);
@@ -374,7 +392,11 @@ fn print_json_diagnostics(errors: &[&esolang_stardust::stardust::StardustError])
         "diagnostics": diagnostics,
     });
 
-    println!("{}", serde_json::to_string(&output).unwrap());
+    let rendered = serde_json::to_string(&output).unwrap_or_else(|e| {
+        eprintln!("JSON serialization error: {}", e);
+        process::exit(1);
+    });
+    println!("{}", rendered);
 }
 
 fn print_cli_usage(program: &str) {

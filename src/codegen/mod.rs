@@ -130,14 +130,14 @@ pub fn compile_to_object(
     compile_to_ir_file(parse_result, &ll_path, config)?;
 
     // 2. 调用 llc 编译为 .o
+    let ll_arg = ll_path.to_str().ok_or_else(|| {
+        CodeGenError::Io(io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))
+    })?;
+    let out_arg = output_path.to_str().ok_or_else(|| {
+        CodeGenError::Io(io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))
+    })?;
     let status = Command::new("llc")
-        .args([
-            &format!("-O{}", config.optimization),
-            "-filetype=obj",
-            ll_path.to_str().unwrap(),
-            "-o",
-            output_path.to_str().unwrap(),
-        ])
+        .args([&format!("-O{}", config.optimization), "-filetype=obj", ll_arg, "-o", out_arg])
         .status()
         .map_err(|_e| CodeGenError::ToolchainMissing { tool: "llc".into() })?;
 
@@ -171,8 +171,14 @@ pub fn compile_to_exe(
 
     // 2. 用 clang 直接编译 .ll → 可执行文件
     let opt_flag = format!("-O{}", config.optimization);
+    let ll_arg = ll_path.to_str().ok_or_else(|| {
+        CodeGenError::Io(io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))
+    })?;
+    let out_arg = output_path.to_str().ok_or_else(|| {
+        CodeGenError::Io(io::Error::new(io::ErrorKind::InvalidInput, "non-UTF-8 path"))
+    })?;
     let status = Command::new("clang")
-        .args([&opt_flag, ll_path.to_str().unwrap(), "-o", output_path.to_str().unwrap()])
+        .args([&opt_flag, ll_arg, "-o", out_arg])
         .status()
         .map_err(|_e| CodeGenError::ToolchainMissing { tool: "clang".into() })?;
 

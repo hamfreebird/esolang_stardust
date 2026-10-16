@@ -92,6 +92,48 @@ pub fn format_frames(frames: &[CallFrame]) -> String {
     lines.join("\n")
 }
 
+/// REPL 帮助文本
+pub fn repl_help(debug_mode: bool) -> &'static str {
+    if debug_mode {
+        "\
+Commands (prefix with ':'):
+  :h, :help         Show this help
+  :q, :quit         Exit REPL
+  :s, :stack        Print stack
+  :hp, :heap        Print heap
+  :i, :info         Print VM state
+  :c, :clear        Clear stack and heap
+  :l, :load <file>  Load and run a .sd file
+  :f, :func <n> <body>  Define function n
+  :funcs            List defined functions
+  :raw              Toggle raw .sd input mode
+  :history          Show command history
+  ── Debugger ──
+  :st, :step        Single-step one instruction
+  :co, :continue    Run to next breakpoint or end
+  :b, :break <n>    Set breakpoint at Mark(n)
+  :lb, :breaks      List breakpoints
+  :db <n>           Delete breakpoint at Mark(n)
+  :list [n]         Show instructions around PC
+  :pc               Show PC and next instruction
+  :bt               Show call stack"
+    } else {
+        "\
+Commands (prefix with ':'):
+  :h, :help         Show this help
+  :q, :quit         Exit REPL
+  :s, :stack        Print stack
+  :hp, :heap        Print heap
+  :i, :info         Print VM state
+  :c, :clear        Clear stack and heap
+  :l, :load <file>  Load and run a .sd file
+  :f, :func <n> <body>  Define function n
+  :funcs            List defined functions
+  :raw              Toggle raw .sd input mode
+  :history          Show command history"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,47 +271,5 @@ mod tests {
     fn debug_help_contains_step_command() {
         assert!(repl_help(true).contains("step"));
         assert!(!repl_help(false).contains("step"));
-    }
-}
-
-/// REPL 帮助文本
-pub fn repl_help(debug_mode: bool) -> &'static str {
-    if debug_mode {
-        "\
-Commands (prefix with ':'):
-  :h, :help         Show this help
-  :q, :quit         Exit REPL
-  :s, :stack        Print stack
-  :hp, :heap        Print heap
-  :i, :info         Print VM state
-  :c, :clear        Clear stack and heap
-  :l, :load <file>  Load and run a .sd file
-  :f, :func <n> <body>  Define function n
-  :funcs            List defined functions
-  :raw              Toggle raw .sd input mode
-  :history          Show command history
-  ── Debugger ──
-  :st, :step        Single-step one instruction
-  :co, :continue    Run to next breakpoint or end
-  :b, :break <n>    Set breakpoint at Mark(n)
-  :lb, :breaks      List breakpoints
-  :db <n>           Delete breakpoint at Mark(n)
-  :list [n]         Show instructions around PC
-  :pc               Show PC and next instruction
-  :bt               Show call stack"
-    } else {
-        "\
-Commands (prefix with ':'):
-  :h, :help         Show this help
-  :q, :quit         Exit REPL
-  :s, :stack        Print stack
-  :hp, :heap        Print heap
-  :i, :info         Print VM state
-  :c, :clear        Clear stack and heap
-  :l, :load <file>  Load and run a .sd file
-  :f, :func <n> <body>  Define function n
-  :funcs            List defined functions
-  :raw              Toggle raw .sd input mode
-  :history          Show command history"
     }
 }

@@ -83,7 +83,7 @@ impl Parser {
 
     /// 处理以 Colon 开头的结构：可能是函数声明或调用
     fn parse_colon_at_top_level(&mut self) -> Result<(), StardustError> {
-        let name = self.current().unwrap().spaces;
+        let name = self.current().map_or(0, |t| t.spaces);
         self.advance(); // 跳过第一个 colon
 
         // 检查调用模式：下一个 token 是 Semicolon
@@ -101,9 +101,14 @@ impl Parser {
         let mut found_end = false;
 
         // 收集函数体，直到遇到匹配的结束 Colon
-        while self.pos < self.tokens.len() {
-            let tok = self.current().unwrap();
-            if tok.token_type == TokenType::Colon && tok.spaces == func_name {
+        //
+        // 注意：必须先判断「调用模式」。函数体内调用**同名**函数时，
+        // 其 Colon 的 spaces 恰好等于 func_name，若先匹配结束标记，
+        // 递归调用会被误判为函数声明结束，导致解析失败
+        // （readme 的斐波那契示例正是因此无法运行）。
+        while let Some(tok) = self.current().cloned() {
+            let is_call = tok.token_type == TokenType::Colon && self.is_call_after_colon();
+            if tok.token_type == TokenType::Colon && tok.spaces == func_name && !is_call {
                 self.advance(); // 消耗结束 Colon
                 found_end = true;
                 break;
@@ -129,6 +134,13 @@ impl Parser {
             return false;
         }
         self.tokens[self.pos].token_type == TokenType::Semicolon
+    }
+
+    /// 当前 token 是 Colon 的情况下，判断它是否构成一次函数调用
+    /// （即 Colon 之后紧跟 Semicolon）。用于在函数体收集循环中
+    /// 区分「递归调用」与「函数声明结束标记」。
+    fn is_call_after_colon(&self) -> bool {
+        self.tokens.get(self.pos + 1).is_some_and(|t| t.token_type == TokenType::Semicolon)
     }
 
     /// 在函数体内解析一条指令

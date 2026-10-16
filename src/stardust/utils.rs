@@ -1,7 +1,7 @@
-use crate::extension::unwind::{preprocess, simple_preprocess};
+use crate::extension::unwind::simple_preprocess;
 use crate::stardust::lexer::tokenize;
 use crate::stardust::parser::parse_program;
-use crate::stardust::{ErrorKind, Instruction, StageResult, StardustError};
+use crate::stardust::{ErrorKind, StageResult, StardustError};
 use std::char::ParseCharError;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -24,16 +24,6 @@ impl From<std::io::Error> for StardustError {
 }
 
 // 用于包装错误并传递
-impl StardustError {
-    fn char_error(err: StardustError, input_path: &str) -> Self {
-        StardustError {
-            kind: ErrorKind::ParseChar,
-            span: None,
-            message: format!("{} in {}", err, input_path),
-        }
-    }
-}
-
 /// 根据字符串生成 Stardust 打印源码
 pub fn generate_print_string(s: &str) -> String {
     let mut code = String::new();
@@ -92,49 +82,37 @@ pub fn compile_file_to_stardust(
     Ok(())
 }
 
-fn natural_source_code(content: String, input_path: &str) -> Result<String, StardustError> {
-    let mut chars_vec: Vec<String> = content.chars().map(|c| c.to_string()).collect();
-    let copy_chars_vec = chars_vec.clone();
+/// 将任意文本转换为「打印该文本」的 Stardust 源码。
+///
+/// 除换行等空白外，每个可见字符都被替换为 `Push(code) CharOut` 序列。
+/// 特别注意：Stardust 的 15 个符号字符（`+ * ` ' : ; . , - = < > & ~ #`）
+/// 在此也必须被转换——它们在这里是要**输出的文本**，而不是指令。
+/// 旧实现把这些符号原样保留，结果是它们被当作指令执行
+/// （例如文本里的 `,` 变成一次真实的 CharOut，随后引发栈下溢）。
+fn natural_source_code(content: String, _input_path: &str) -> Result<String, StardustError> {
+    let mut out = String::with_capacity(content.len() * 8);
 
-    let mut in_anno: bool = false;
-    for (index, char) in chars_vec.iter_mut().enumerate() {
-        if in_anno {
+    for ch in content.chars() {
+        // 换行保留为换行（源码结构），其余可打印 ASCII（含空格）
+        // 一律转成 Push + CharOut，这样空格和标点都能原样输出。
+        if ch == '\n' {
+            out.push('\n');
             continue;
-        };
-        let _char = char.chars().next().unwrap();
-        if _char.is_whitespace() | is_symbol(_char) {
-            if _char == '\n' {
-                in_anno = false;
-            }
+        }
+        if ch == ' ' || ch == '\t' {
+            out.push_str(&generate_print_string(" "));
             continue;
-        } else if is_anno(_char) && is_anno(copy_chars_vec[index].parse()?) {
-            in_anno = true;
-        } else if _char.is_ascii() {
-            let _char = char.clone();
-            let sd_char = match preprocess(_char.as_str()) {
-                Ok(uw) => uw,
-                Err(e) => {
-                    return Err(StardustError::char_error(e, input_path));
-                }
-            };
-            char.replace_range(0..1, sd_char.as_ref());
+        }
+        // 可见 ASCII（字母、数字、标点、Stardust 符号）→ Push + CharOut
+        if ch.is_ascii_graphic() {
+            out.push_str(&generate_print_string(&ch.to_string()));
         } else {
-            char.replace_range(0..1, " ");
+            // 非 ASCII 字符没有可打印表示，替换为空格占位
+            out.push(' ');
         }
     }
 
-    Ok(chars_vec.concat())
-}
-
-fn is_symbol(ch: char) -> bool {
-    matches!(
-        ch,
-        '+' | '*' | '`' | '\'' | ':' | ';' | '.' | ',' | '-' | '=' | '<' | '>' | '&' | '~' | '#'
-    )
-}
-
-fn is_anno(ch: char) -> bool {
-    matches!(ch, '/')
+    Ok(out)
 }
 
 /// 便捷函数：自动生成输出文件名（扩展名改为 `.stardust`）
@@ -181,7 +159,18 @@ pub fn bump_run_source(filename: &String) -> Vec<StageResult> {
         }
     };
 
-    let unwind_source = match simple_preprocess(&source) {
+    // 与 cmd_run 流水线一致：先剥离 #[key=value] 注解再预处理
+    let clean_source = match crate::stardust::config::parse_config(&source) {
+        Ok((_cfg, clean)) => clean,
+        Err(e) => {
+            let msg = format!("Config error: {}", e);
+            eprintln!("{}", msg);
+            results[1] = StageResult::Error(msg);
+            return results;
+        }
+    };
+
+    let unwind_source = match simple_preprocess(&clean_source) {
         Ok(uw) => {
             let owned = uw.into_owned();
             results[1] = StageResult::UnwindSource(owned.clone());
@@ -243,125 +232,118 @@ fn format_long_line(line: &str) -> String {
     result
 }
 
-/// 格式化单条指令
-fn format_instruction(instr: &Instruction) -> String {
-    instr.format()
-}
-
+/// 主格式化函数
 /// 主格式化函数
 pub fn format_results(results: &[StageResult]) -> String {
-    use std::fmt::Write;
-
+    // 统一用 `push_str(&format!(..))` 而非 `writeln!(..).unwrap()`：
+    // 对 `String` 的写入永远不会失败，不需要处理 Result。
     let mut output = String::new();
     let stage_names = ["1. Source", "2. Unwind Source", "3. Tokens", "4. Parsed"];
 
     for (i, stage_result) in results.iter().enumerate() {
         let stage_title = if i < stage_names.len() { stage_names[i] } else { "Extra Stage" };
-        writeln!(output, "=== {} ===", stage_title).unwrap();
+        output.push_str(&format!("=== {} ===\n", stage_title));
 
         match stage_result {
             StageResult::Source(src) => {
-                writeln!(output, "Status: Success").unwrap();
-                writeln!(output, "Length: {} bytes", src.len()).unwrap();
-                writeln!(output, "Content:").unwrap();
-                for line in src.lines() {
-                    if line.len() > 100 {
-                        let formatted = format_long_line(line);
-                        for sub_line in formatted.lines() {
-                            writeln!(output, "{}", sub_line).unwrap();
-                        }
-                    } else {
-                        writeln!(output, "{}", line).unwrap();
-                    }
-                }
+                output.push_str(&render_text_stage(src));
             }
             StageResult::UnwindSource(uw_src) => {
-                writeln!(output, "Status: Success").unwrap();
-                writeln!(output, "Length: {} bytes", uw_src.len()).unwrap();
-                writeln!(output, "Content:").unwrap();
-                for line in uw_src.lines() {
-                    if line.len() > 100 {
-                        let formatted = format_long_line(line);
-                        for sub_line in formatted.lines() {
-                            writeln!(output, "{}", sub_line).unwrap();
-                        }
-                    } else {
-                        writeln!(output, "{}", line).unwrap();
-                    }
-                }
+                output.push_str(&render_text_stage(uw_src));
             }
             StageResult::Tokens(tokens) => {
-                writeln!(output, "Status: Success").unwrap();
-                writeln!(output, "Total tokens: {}", tokens.len()).unwrap();
+                output.push_str("Status: Success\n");
+                output.push_str(&format!("Total tokens: {}\n", tokens.len()));
                 if tokens.is_empty() {
-                    writeln!(output, "No tokens.").unwrap();
+                    output.push_str("No tokens.\n");
                 } else {
                     for (idx, tok) in tokens.iter().enumerate() {
-                        writeln!(
-                            output,
-                            "[{:3}] line {:3}:{:3} | spaces={} | {:?}",
+                        output.push_str(&format!(
+                            "[{:3}] line {:3}:{:3} | spaces={} | {:?}\n",
                             idx, tok.line, tok.column, tok.spaces, tok.token_type
-                        )
-                        .unwrap();
+                        ));
                     }
                 }
             }
             StageResult::Parsed(parsed) => {
-                writeln!(output, "Status: Success").unwrap();
-                writeln!(output, "Main instructions: {}", parsed.main_instructions.len()).unwrap();
-                writeln!(output, "Main marks: {}", parsed.main_marks.len()).unwrap();
-                writeln!(output, "Functions defined: {}", parsed.functions.len()).unwrap();
+                output.push_str("Status: Success\n");
+                output.push_str(&format!(
+                    "Main instructions: {}\nMain marks: {}\nFunctions defined: {}\n",
+                    parsed.main_instructions.len(),
+                    parsed.main_marks.len(),
+                    parsed.functions.len()
+                ));
 
-                if !parsed.main_instructions.is_empty() {
-                    writeln!(output, "Main instructions:").unwrap();
+                if parsed.main_instructions.is_empty() {
+                    output.push_str("Main instructions: (none)\n");
+                } else {
+                    output.push_str("Main instructions:\n");
                     for (idx, instr) in parsed.main_instructions.iter().enumerate() {
-                        writeln!(output, "  {:3}: {}", idx, format_instruction(instr)).unwrap();
+                        output.push_str(&format!("  {:3}: {}\n", idx, instr.format()));
                     }
-                } else {
-                    writeln!(output, "Main instructions: (none)").unwrap();
                 }
 
-                if !parsed.main_marks.is_empty() {
-                    writeln!(output, "Main marks:").unwrap();
-                    for (mark_name, &instr_idx) in parsed.main_marks.iter() {
-                        writeln!(output, "  mark {} -> instruction index {}", mark_name, instr_idx)
-                            .unwrap();
-                    }
+                if parsed.main_marks.is_empty() {
+                    output.push_str("Main marks: (none)\n");
                 } else {
-                    writeln!(output, "Main marks: (none)").unwrap();
+                    output.push_str("Main marks:\n");
+                    let mut marks: Vec<_> = parsed.main_marks.iter().collect();
+                    marks.sort_by_key(|(name, _)| **name);
+                    for (mark_name, instr_idx) in marks {
+                        output.push_str(&format!(
+                            "  mark {} -> instruction index {}\n",
+                            mark_name, instr_idx
+                        ));
+                    }
                 }
 
-                if !parsed.functions.is_empty() {
-                    writeln!(output, "Functions:").unwrap();
-                    for (func_name, func_def) in parsed.functions.iter() {
-                        writeln!(
-                            output,
-                            "  function {} ({} instructions):",
+                if parsed.functions.is_empty() {
+                    output.push_str("Functions: (none)\n");
+                } else {
+                    output.push_str("Functions:\n");
+                    let mut funcs: Vec<_> = parsed.functions.iter().collect();
+                    funcs.sort_by_key(|(name, _)| **name);
+                    for (func_name, func_def) in funcs {
+                        output.push_str(&format!(
+                            "  function {} ({} instructions):\n",
                             func_name,
                             func_def.body.len()
-                        )
-                        .unwrap();
+                        ));
                         for (idx, instr) in func_def.body.iter().enumerate() {
-                            writeln!(output, "    {:3}: {}", idx, format_instruction(instr))
-                                .unwrap();
+                            output.push_str(&format!("    {:3}: {}\n", idx, instr.format()));
                         }
                     }
-                } else {
-                    writeln!(output, "Functions: (none)").unwrap();
                 }
             }
             StageResult::Error(err_msg) => {
-                writeln!(output, "Status: ERROR").unwrap();
-                writeln!(output, "Message: {}", err_msg).unwrap();
+                output.push_str(&format!("Status: ERROR\nMessage: {}\n", err_msg));
             }
             StageResult::None => {
-                writeln!(output, "Status: Not executed (previous stage failed)").unwrap();
+                output.push_str("Status: Not executed (previous stage failed)\n");
             }
         }
-        writeln!(output).unwrap(); // 阶段间空行
+        output.push('\n'); // 阶段间空行
     }
 
     output
+}
+
+/// 渲染一个「原始文本 / 预处理后文本」阶段的内容。
+fn render_text_stage(src: &str) -> String {
+    let mut out = String::new();
+    out.push_str("Status: Success\n");
+    out.push_str(&format!("Length: {} bytes\n", src.len()));
+    out.push_str("Content:\n");
+    for line in src.lines() {
+        if line.len() > 100 {
+            out.push_str(&format_long_line(line));
+            out.push('\n');
+        } else {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 pub fn print_usage(program: &str) {

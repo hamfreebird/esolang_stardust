@@ -61,22 +61,21 @@ pub fn parse_config(source: &str) -> Result<(VmConfig, String), ParseConfigError
     let mut config = VmConfig::default();
     let mut clean = String::with_capacity(source.len());
 
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if let Some(kv) = trimmed.strip_prefix("#[") {
-            if let Some(kv) = kv.strip_suffix(']') {
-                if let Some((key, value)) = kv.split_once('=') {
-                    let key = key.trim();
-                    let value = value.trim();
-                    apply_config(&mut config, key, value)?;
-                    continue; // 不保留注解行
-                }
-            }
-        }
-        // 保留非注解行
-        if !clean.is_empty() {
+    // 逐行处理；注解行替换为空行以保持行号与源码一致（错误定位依赖行号）。
+    for (idx, line) in source.lines().enumerate() {
+        if idx > 0 {
             clean.push('\n');
         }
+
+        let annotation = line.trim().strip_prefix("#[").and_then(|kv| kv.strip_suffix(']'));
+        if let Some(kv) = annotation
+            && let Some((key, value)) = kv.split_once('=')
+        {
+            apply_config(&mut config, key.trim(), value.trim())?;
+            // 注解内容不保留，但该行的位置由空行占位
+            continue;
+        }
+
         clean.push_str(line);
     }
 
@@ -181,7 +180,8 @@ mod tests {
     fn parse_single_config() {
         let (c, cleaned) = parse_config("#[max_steps=500]\n+*").unwrap();
         assert_eq!(c.max_steps, Some(500));
-        assert_eq!(cleaned, "+*");
+        // 注解行由空行占位，保持行号
+        assert_eq!(cleaned, "\n+*");
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(c.max_steps, Some(100));
         assert_eq!(c.max_stack_size, 5000);
         assert_eq!(c.char_mode, CharMode::Unicode);
-        assert_eq!(cleaned, "+");
+        assert_eq!(cleaned, "\n\n\n+");
     }
 
     #[test]
@@ -212,6 +212,51 @@ mod tests {
         let src = "+*\n#[max_steps=5]\n,";
         let (c, cleaned) = parse_config(src).unwrap();
         assert_eq!(c.max_steps, Some(5));
-        assert_eq!(cleaned, "+*\n,");
+        assert_eq!(cleaned, "+*\n\n,");
+    }
+
+    #[test]
+    fn annotation_lines_preserve_line_numbers() {
+        // 回归测试：注解行被空行占位，后续行的行号必须与源码一致。
+        // 修复前 clean 用 "非空才加 \n" 的策略，首行为空/注解时行号会整体前移，
+        // 导致所有运行时错误定位到错误的行。
+        use crate::stardust::lexer::tokenize;
+
+        let src = "#[max_steps=5]\n     +\n";
+        let (_, clean) = parse_config(src).unwrap();
+        let toks = tokenize(&clean).unwrap();
+        assert_eq!(toks[0].line, 2, "第 1 行是注解，第 2 行指令应在 line 2");
+    }
+
+    #[test]
+    fn annotation_lines_preserve_line_numbers_with_leading_blank() {
+        use crate::stardust::lexer::tokenize;
+
+        // 首行为空行的情况最容易触发行号偏移
+        let src = "\n#[max_steps=5]\n\n     +\n";
+        let (_, clean) = parse_config(src).unwrap();
+        let toks = tokenize(&clean).unwrap();
+        assert_eq!(toks[0].line, 4);
+    }
+
+    #[test]
+    fn multiple_annotations_preserve_line_numbers() {
+        use crate::stardust::lexer::tokenize;
+
+        let src = "#[max_steps=5]\n#[char_mode=unicode]\n     +\n";
+        let (c, clean) = parse_config(src).unwrap();
+        assert_eq!(c.max_steps, Some(5));
+        assert_eq!(c.char_mode, CharMode::Unicode);
+        let toks = tokenize(&clean).unwrap();
+        assert_eq!(toks[0].line, 3);
+    }
+
+    #[test]
+    fn malformed_annotation_is_kept_verbatim() {
+        // 不是合法 key=value 的 `#[...]` 不应被吞掉，交给词法器报错
+        let src = "#[not_a_pair]\n     +";
+        let (c, clean) = parse_config(src).unwrap();
+        let _ = c;
+        assert_eq!(clean, src);
     }
 }
