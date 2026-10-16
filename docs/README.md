@@ -14,7 +14,7 @@ Stardust 是一种受 **Starry** 与 **Whitespace** 启发的深奥编程语言�
 | **执行模型** | 多栈帧调用架构，函数调用创建独立栈帧 |
 | **类型系统** | 无类型，所有值为 `i64` 整数 |
 | **内存模型** | 栈（每帧独立）+ 堆（全局共享，`i64 → i64` 映射） |
-| **实现语言** | Rust 2024 Edition (MSRV 1.85) |
+| **实现语言** | Rust 2024 Edition (MSRV 1.95) |
 | **许可协议** | MIT |
 
 ## 与 Starry 的关键区别
@@ -57,11 +57,11 @@ Stardust 是一种受 **Starry** 与 **Whitespace** 启发的深奥编程语言�
 
 | 文件 | 内容 |
 |------|------|
-| [errors.md](errors.md) | 错误类型系统 — 35+ 种 ErrorKind 的完整参考 |
-| [testing.md](testing.md) | 测试体系 — 340+ 测试的覆盖范围 |
+| [errors.md](errors.md) | 错误类型系统 — 40+ 种 ErrorKind 的完整参考 |
+| [testing.md](testing.md) | 测试体系 — 425 个测试的覆盖范围 |
 | [file-index.md](file-index.md) | 文件索引 — 所有源文件的位置与说明 |
 
 ---
 
-> 本文档基于 Stardust v0.1.5 源码生成。
-> 最后更新：2026-06-05
+> 本文档基于 Stardust v0.1.6 源码整理。
+> 最后更新：2026-10-16

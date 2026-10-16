@@ -1,19 +1,6 @@
 use crate::extension::char2sd_list::*;
-use crate::stardust::{ErrorKind, StardustError};
+use crate::stardust::StardustError;
 use std::borrow::Cow;
-
-impl StardustError {
-    fn code_point_too_large(c: char) -> Self {
-        StardustError {
-            kind: ErrorKind::CodePointTooLarge,
-            span: None,
-            message: format!(
-                "character '{}' has code point {} which exceeds safety limit",
-                c, c as u32
-            ),
-        }
-    }
-}
 
 /// 对输入文本进行预处理：将 ASCII 字母和数字替换为预定义的常量字符串。
 ///
@@ -124,29 +111,36 @@ fn digit_replacement(c: char) -> &'static str {
 }
 
 pub fn simple_preprocess(input: &str) -> Result<Cow<'_, str>, StardustError> {
-    const MAX_CODE_POINT: u32 = 0x7F; // 仅 ASCII 字符
-
-    // 计算所需总容量，验证字符合法性
-    let mut required_capacity = 0;
-    for ch in input.chars() {
-        let code = ch as u32;
-        if ch.is_ascii_alphanumeric() {
-            if code > MAX_CODE_POINT {
-                return Err(StardustError::code_point_too_large(ch));
-            }
-            let spaces = (code as usize) + 5;
-            required_capacity += spaces + 1;
-        } else {
-            required_capacity += ch.len_utf8();
-        }
+    // 没有可替换字符时零分配返回
+    if !input.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Ok(Cow::Borrowed(input));
     }
 
-    // 构建字符串
-    let mut result = String::with_capacity(required_capacity);
-    for ch in input.chars() {
+    // 每个字母数字最多展开成 133 字节（127 + 5 空格 + '+'）；
+    // 这里只给个粗略提示，真正的扩容交给 String 自己。
+    let alnum = input.chars().filter(|c| c.is_ascii_alphanumeric()).count();
+    let mut result = String::with_capacity(input.len() + alnum * 8);
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        // 注释 `//` 到行尾的内容必须原样保留。
+        // 注释里的字母数字是给人看的说明文字，展开成 Push 序列虽然不影响
+        // 执行（仍在注释行内），但会让 --dump 的预处理阶段输出变得不可读：
+        // 一个 13 字节的 `// print ABC` 会膨胀到 800 多字节。
+        if ch == '/' && chars.peek() == Some(&'/') {
+            result.push_str("//");
+            chars.next(); // 消耗第二个 '/'
+            for c in chars.by_ref() {
+                result.push(c);
+                if c == '\n' {
+                    break;
+                }
+            }
+            continue;
+        }
+
         if ch.is_ascii_alphanumeric() {
-            let spaces = (ch as usize) + 5;
-            for _ in 0..spaces {
+            for _ in 0..(ch as usize + 5) {
                 result.push(' ');
             }
             result.push('+');
@@ -230,7 +224,51 @@ mod tests {
     #[test]
     fn simple_preserves_comments() {
         let result = simple_preprocess("// Hi").unwrap();
-        assert!(result.contains("//"));
+        assert_eq!(result, "// Hi", "注释内容必须原样保留，不得展开成 Push 序列");
+    }
+
+    #[test]
+    fn simple_comment_content_is_not_expanded() {
+        // 回归测试：注释里的字母数字过去会被展开成 Push 序列，
+        // 让 --dump 的预处理阶段输出从 13 字节膨胀到 800 多字节。
+        let src = "// print ABC\n     +";
+        let out = simple_preprocess(src).unwrap();
+        assert!(
+            out.starts_with("// print ABC\n"),
+            "注释应原样保留，实际得到: {:?}",
+            &out[..out.len().min(40)]
+        );
+        // 注释之后才是真正需要展开的代码部分
+        assert!(out.len() < 80, "总长度不应因注释而膨胀，实际 {} 字节", out.len());
+    }
+
+    #[test]
+    fn simple_expands_code_outside_comments() {
+        // 确认跳过注释的同时，注释之外的字母数字仍被正常展开
+        let out = simple_preprocess("// abc\nA").unwrap();
+        assert!(out.starts_with("// abc\n"), "注释原样：{}", &out[..20]);
+        // 'A' = 65 → 70 个空格 + '+'，共 71 字节
+        assert_eq!(out.len(), "// abc\n".len() + 71);
+    }
+
+    #[test]
+    fn simple_single_slash_is_not_a_comment() {
+        // 单独的 `/` 不是注释起始，仍按原样交给词法器报 InvalidAnnotation
+        let out = simple_preprocess("/ A").unwrap();
+        assert!(out.starts_with('/'), "单个斜杠应原样保留");
+    }
+
+    #[test]
+    fn simple_comment_at_eof_without_newline() {
+        // 注释在文件末尾且无换行符
+        let out = simple_preprocess("     +\n// tail").unwrap();
+        assert!(out.ends_with("// tail"), "结尾注释应完整保留");
+    }
+
+    #[test]
+    fn simple_consecutive_comments() {
+        let out = simple_preprocess("// a\n// b\nA").unwrap();
+        assert!(out.starts_with("// a\n// b\n"), "连续注释都应保留");
     }
 
     // ── preprocess ─────────────────────────────────────────────────────────

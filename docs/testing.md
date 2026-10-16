@@ -1,24 +1,24 @@
 # 测试体系
 
-> **实现位置**：各源文件内联 `#[cfg(test)] mod tests` + `tests/integration_test.rs` (1081 行)
+> **实现位置**：各源文件内联 `#[cfg(test)] mod tests` + `tests/integration_test.rs` (1373 行)
 
 ## 1. 测试概况
 
 | 模块 | 位置 | 测试数（约） | 类型 |
 |------|------|------------|------|
-| 词法分析器 | `src/stardust/lexer.rs` | 61 | 单元测试 |
-| 语法分析器 | `src/stardust/parser.rs` | 60 | 单元测试 |
-| 配置解析 | `src/stardust/config.rs` | 6 | 单元测试 |
-| IR 优化器 | `src/codegen/optimizer.rs` | 32 | 单元测试 |
-| LLVM 编译器 | `src/codegen/compiler.rs` | 33 | 单元测试 |
-| REPL 解析器 | `src/repl/parser.rs` | 12 | 单元测试 |
+| 词法分析器 | `src/stardust/lexer.rs` | 97 | 单元测试 |
+| 语法分析器 | `src/stardust/parser.rs` | 63 | 单元测试 |
+| 配置解析 | `src/stardust/config.rs` | 12 | 单元测试 |
+| IR 优化器 | `src/codegen/optimizer.rs` | 38 | 单元测试 |
+| LLVM 编译器 | `src/codegen/compiler.rs` | 47 | 单元测试 |
+| REPL 解析器 | `src/repl/parser.rs` | 14 | 单元测试 |
 | REPL 执行器 | `src/repl/executor.rs` | 8 | 单元测试 |
-| REPL 显示 | `src/repl/display.rs` | 11 | 单元测试 |
+| REPL 显示 | `src/repl/display.rs` | 14 | 单元测试 |
 | REPL 主循环 | `src/repl/mod.rs` | 3 | 单元测试 |
-| 预处理 | `src/extension/unwind.rs` | 16 | 单元测试 |
-| 集成测试 | `tests/integration_test.rs` | 99 | 集成测试 |
+| 预处理 | `src/extension/unwind.rs` | 20 | 单元测试 |
+| 集成测试 | `tests/integration_test.rs` | 109 | 集成测试 |
 | LLVM 集成测试 | `tests/integration_test.rs` (codegen_tests) | 18 | 集成测试 |
-| **总计** | | **~340+** | |
+| **总计** | | **425** | |
 
 ### 1.1 运行测试
 
@@ -47,7 +47,7 @@ allow-unwrap-in-tests = true
 
 测试中允许 `unwrap()` 使用（生产代码中 `unwrap_used` 是 warn 级别）。
 
-## 2. 词法分析器测试（61 个）
+## 2. 词法分析器测试（97 个）
 
 **文件**：`src/stardust/lexer.rs` 内联 `#[cfg(test)] mod tests`
 
@@ -77,7 +77,7 @@ fn collect_all(source) -> Vec<Token>         // 收集所有 Token（unwrap）
 fn collect_until_err(source) -> (Vec<Token>, Option<StardustError>)  // 收集到错误
 ```
 
-## 3. 语法分析器测试（60 个）
+## 3. 语法分析器测试（63 个）
 
 **文件**：`src/stardust/parser.rs` 内联 `#[cfg(test)] mod tests`
 
@@ -144,7 +144,7 @@ VM 本身没有内联单元测试（测试通过 `tests/integration_test.rs` 中
 | StackOverflow | 大量 Push + 低 max_stack |
 | HeapOverflow | 大量 Store + 低 max_heap |
 
-## 5. LLVM 编译器测试（33 个）
+## 5. LLVM 编译器测试（47 个）
 
 **文件**：`src/codegen/compiler.rs` 内联测试
 
@@ -152,15 +152,32 @@ VM 本身没有内联单元测试（测试通过 `tests/integration_test.rs` 中
 - 验证 IR 语法（通过 llc 解析）
 - 可选：编译并运行，验证输出正确性
 
-**codegen_tests 模块**（18 个，`tests/integration_test.rs` 内）：
+**codegen_tests 模块**（`tests/integration_test.rs` 内）：
 
-- 完整的端到端 LLVM 编译测试
-- 包含：Hello World、算术、控制流、函数调用
-- 需要系统安装 `clang` 和 `llc`（未安装时跳过）
+- 完整的端到端 LLVM 编译测试：Hello World、算术、控制流、函数调用
+- 需要系统安装 `clang` 和 `llc`
+
+### 5.1 IR 合法性校验（关键护栏）
+
+`every_single_instruction_produces_valid_ir` 与
+`deep_expression_program_produces_valid_ir` / `function_program_produces_valid_ir`
+为**每条指令**构造最小程序，生成 IR 后用 `clang -c -o /dev/null` 校验，
+clang 拒绝 IR 时测试直接 panic。
+
+这组测试的存在意义：编译器单元测试此前只做 `ir.contains("@malloc")` 这类
+字符串断言，无法发现非法 IR，导致以下缺陷长期存在且测试全绿——
+
+- `Reverse` / `Pick` 连续两行定义同名 SSA 变量 → `multiple definition`
+- `DumpStack` / `DumpState` 调用从未定义的 `@fprintf_stderr` → 链接失败
+- `compile_ujump` 的死块缺少终结指令 → 后续 `mark_` 标签使整份 IR 非法
+- 错误消息 `at %s` 无对应实参 → printf 读出乱码字节
+
+> 修改 `src/codegen/` 时务必同步在此添加用例。新增指令不仅要能生成 IR，
+> 还必须通过 clang 的解析与验证。
 
 ## 6. REPL 测试
 
-### 6.1 简写解析器（12 个）
+### 6.1 简写解析器（14 个）
 
 - Push/算术/I/O/控制流/函数调用的简写解析
 - 字符串展开
@@ -172,7 +189,7 @@ VM 本身没有内联单元测试（测试通过 `tests/integration_test.rs` 中
 - 栈/堆状态注入和取回
 - 函数定义持久化
 
-### 6.3 显示（11 个）
+### 6.3 显示（14 个）
 
 - stack/heap/info/nearby/frames 格式化输出
 - 截断行为（栈超过 20 项、堆超过 30 条）
@@ -184,20 +201,20 @@ VM 本身没有内联单元测试（测试通过 `tests/integration_test.rs` 中
 
 ## 7. 其他测试
 
-### 配置解析（6 个）
+### 配置解析（12 个）
 
 - 默认值验证
 - max_steps/time_limit 设为 0 = 无限制
 - 单配置/多配置/无配置解析
 - 未知键错误
 
-### 预处理（16 个）
+### 预处理（20 个）
 
 - ASCII 字母/数字映射
 - 字符串正确性
 - 无替换时的零分配（Cow::Borrowed）
 
-### IR 优化器（32 个）
+### IR 优化器（38 个）
 
 - 常量折叠：所有算术/比较/逻辑操作的 Push+Op 模式
 - 死代码消除：Push+Pop、Dup+Pop

@@ -7,3 +7,9 @@ node_modules/
 *.ll
 hello_world_bin
 
+# --dump 的 4 阶段分析输出
+*.stardust_dump
+
+# --stardust 文本转换的输出（与输入同名，改扩展名）
+*.stardust
+

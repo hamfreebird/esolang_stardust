@@ -1,6 +1,6 @@
 # 实现架构
 
-> **实现语言**：Rust 2024 Edition (MSRV 1.85) · **依赖**：`serde` + `serde_json` (仅 CLI/JSON 模式)
+> **实现语言**：Rust 2024 Edition (rust-version 1.95) · **依赖**：`serde` + `serde_json` (仅 CLI/JSON 模式)
 
 ## 1. 系统概览
 
