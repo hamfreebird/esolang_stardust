@@ -13,7 +13,7 @@ stardust -r -d program.sd    # 加载文件后进入调试 REPL
 
 欢迎信息：
 ```
-Stardust REPL 0.1.5 [debug mode]
+Stardust REPL 0.1.6 [debug mode]
 Type Stardust instructions or :help for help.
 ─────────────────────────────────────────────────
 sd>

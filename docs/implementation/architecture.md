@@ -239,9 +239,9 @@ self.debug = debug;  // 放回 Debugger
 ```toml
 [package]
 name = "esolang_stardust"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

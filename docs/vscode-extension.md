@@ -4,7 +4,7 @@
 
 ## 1. 安装
 
-从 `build/stardust-0.1.5.vsix` 安装，或从源码构建：
+从 `build/stardust-0.1.6.vsix` 安装，或从源码构建：
 
 ```bash
 cd stardust-vscode
@@ -35,8 +35,6 @@ npx vsce package
 - 指令名称
 - 栈变化描述
 - 前导空格数量含义
-
-**已知限制**：`=`, `&`, `-`, `<`, `>`, `#` 六组符号的提示信息未随 v0.1.5 指令集扩展更新。
 
 ### 2.3 实时诊断
 
@@ -96,18 +94,22 @@ stardust-vscode/
 {
   "name": "stardust",
   "displayName": "Stardust Language Support",
-  "version": "0.1.5",
-  "engines": { "vscode": "^1.85.0" },
-  "activationEvents": ["onLanguage:stardust"],
+  "version": "0.1.6",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["onLanguage:sd"],
   "contributes": {
-    "languages": [{ "id": "stardust", "extensions": [".sd", ".stardust"] }],
-    "grammars": [{ "language": "stardust", "path": "./syntaxes/sd.tmLanguage.json" }],
+    "languages": [{ "id": "sd", "extensions": [".sd", ".stardust"] }],
+    "grammars": [{ "language": "sd", "path": "./syntaxes/sd.tmLanguage.json" }],
     "commands": [
-      { "command": "stardust.run", "title": "Run Stardust File" },
-      { "command": "stardust.check", "title": "Check Stardust Syntax" }
+      { "command": "stardust.run", "title": "Stardust: Run current file" },
+      { "command": "stardust.debug", "title": "Stardust: Debug current file" },
+      { "command": "stardust.check", "title": "Stardust: Check syntax" },
+      { "command": "stardust.compile", "title": "Stardust: Compile to LLVM IR / Convert text to Stardust code" }
     ],
     "keybindings": [
-      { "command": "stardust.check", "key": "ctrl+shift+c", "when": "editorLangId == stardust" }
+      { "command": "stardust.run", "key": "f5", "when": "editorLangId == sd" },
+      { "command": "stardust.debug", "key": "ctrl+f5", "when": "editorLangId == sd" },
+      { "command": "stardust.check", "key": "ctrl+shift+c", "when": "editorLangId == sd" }
     ],
     "configuration": {
       "properties": {

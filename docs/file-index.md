@@ -90,7 +90,7 @@
 | `stardust-linux-x86_64` | Linux x86_64 二进制 |
 | `stardust-linux-aarch64` | Linux ARM64 二进制 |
 | `stardust-windows-x86_64.exe` | Windows x86_64 二进制 |
-| `stardust-0.1.5.vsix` | VSCode 扩展包 |
+| `stardust-0.1.6.vsix` | VSCode 扩展包 |
 
 ## CI/CD
 

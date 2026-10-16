@@ -340,7 +340,7 @@ stardust --check code.sd
 
 ## VSCode 扩展
 
-安装 `build/stardust-0.1.5.vsix`（或从 `stardust-vscode/` 目录运行 `npx vsce package` 构建）获得：
+安装 `build/stardust-0.1.6.vsix`（或从 `stardust-vscode/` 目录运行 `npx vsce package` 构建）获得：
 
 - **语法高亮**：`.sd` / `.stardust` 文件的符号着色
 - **悬停提示**：鼠标悬停显示指令语义和栈变化
