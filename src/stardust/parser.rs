@@ -201,6 +201,8 @@ impl Parser {
             TokenType::Comma => match spaces {
                 0 => return Ok(Instruction::CharOut(meta)),
                 1 => return Ok(Instruction::CharIn(meta)),
+                2 => return Ok(Instruction::FileRead(meta)),
+                3 => return Ok(Instruction::FileWrite(meta)),
                 _ => ErrorKind::InvalidSpacesForComma { spaces },
             },
             TokenType::Equals => match spaces {
@@ -514,10 +516,22 @@ mod tests {
     }
 
     #[test]
-    fn invalid_spaces_for_comma_2() {
-        let result = parse_program(vec![comma(2)]);
+    fn file_read_2_comma() {
+        let result = parse_program(vec![comma(2)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::FileRead(meta())]);
+    }
+
+    #[test]
+    fn file_write_3_comma() {
+        let result = parse_program(vec![comma(3)]).unwrap();
+        assert_eq!(result.main_instructions, vec![Instruction::FileWrite(meta())]);
+    }
+
+    #[test]
+    fn invalid_spaces_for_comma_4() {
+        let result = parse_program(vec![comma(4)]);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForComma { spaces: 2 });
+        assert_eq!(result.unwrap_err().kind, ErrorKind::InvalidSpacesForComma { spaces: 4 });
     }
 
     // ═══════════ 4. 控制流 (符号 ` ' ~) ═══════════

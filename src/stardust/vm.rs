@@ -20,6 +20,43 @@ fn framed_err(kind: ErrorKind, meta: &InstrMeta) -> StardustError {
     StardustError::new(kind, Some(meta.span.clone()))
 }
 
+/// 从栈顶弹出一段以「字符序列 + 长度」表示的文件路径/数据。
+///
+/// 栈布局为 `[chars..., len]`（字符按自然顺序排列，长度在栈顶）。
+fn pop_string_from_stack(frame: &mut CallFrame, meta: &InstrMeta) -> Result<String, StardustError> {
+    let len = pop_frame(frame, meta)?;
+    if len < 0 || len as usize > frame.stack.len() {
+        return Err(framed_err(ErrorKind::StackUnderflow, meta));
+    }
+    let mut chars = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        let value = pop_frame(frame, meta)?;
+        let ch = char::from_u32(value as u32)
+            .ok_or_else(|| framed_err(ErrorKind::InvalidCodePoint { value }, meta))?;
+        chars.push(ch);
+    }
+    chars.reverse();
+    Ok(chars.into_iter().collect())
+}
+
+/// 将字符串按「字符序列 + 长度」压栈，供 FileRead 返回内容。
+fn push_string_to_stack(
+    frame: &mut CallFrame,
+    config: &VmConfig,
+    meta: &InstrMeta,
+    text: &str,
+) -> Result<(), StardustError> {
+    let count = text.chars().count();
+    if frame.stack.len() + count + 1 > config.max_stack_size {
+        return Err(framed_err(ErrorKind::StackOverflow, meta));
+    }
+    for ch in text.chars() {
+        frame.stack.push(ch as i64);
+    }
+    frame.stack.push(count as i64);
+    Ok(())
+}
+
 /// I/O 抽象 trait — 允许注入 mock 实现用于测试和 IDE 集成
 pub trait VmIO {
     fn write_char(&mut self, ch: char) -> io::Result<()>;
@@ -245,6 +282,34 @@ fn execute_in_frame<I: VmIO>(
                 .read_char()
                 .map_err(|e| framed_err(ErrorKind::IoError { reason: e.to_string() }, meta))?;
             frame.stack.push(byte as i64);
+            frame.pc += 1;
+        }
+
+        // ── 文件 I/O ─────────────────────────────────────────
+        //
+        // 栈上字符串统一表示为 `[chars..., len]`，字符是 Unicode 码点。
+        // FileRead  : [path chars..., path_len] -> [contents chars..., contents_len]
+        // FileWrite : [path chars..., path_len, data chars..., data_len] -> []
+        Instruction::FileRead(meta) => {
+            let path = pop_string_from_stack(frame, meta)?;
+            let contents = std::fs::read_to_string(&path).map_err(|e| {
+                framed_err(
+                    ErrorKind::IoError { reason: format!("failed to read `{path}`: {e}") },
+                    meta,
+                )
+            })?;
+            push_string_to_stack(frame, config, meta, &contents)?;
+            frame.pc += 1;
+        }
+        Instruction::FileWrite(meta) => {
+            let data = pop_string_from_stack(frame, meta)?;
+            let path = pop_string_from_stack(frame, meta)?;
+            std::fs::write(&path, data.as_bytes()).map_err(|e| {
+                framed_err(
+                    ErrorKind::IoError { reason: format!("failed to write `{path}`: {e}") },
+                    meta,
+                )
+            })?;
             frame.pc += 1;
         }
 

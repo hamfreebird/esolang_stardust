@@ -252,6 +252,10 @@ impl<'a> FuncCompiler<'a> {
             Instruction::NumIn(_) => self.compile_numin(),
             Instruction::CharOut(_) => self.compile_charout(),
             Instruction::CharIn(_) => self.compile_charin(),
+            Instruction::FileRead(_) | Instruction::FileWrite(_) => {
+                // LLVM 后端暂不提供文件 I/O 运行时；解释器后端支持。
+                self.emitln("  ; FileRead/FileWrite unsupported in LLVM backend");
+            }
             Instruction::Mark { name, .. } => self.compile_mark(*name),
             Instruction::Jump { name, .. } => self.compile_jump(*name),
             Instruction::UnconditionalJump { name, .. } => self.compile_ujump(*name),

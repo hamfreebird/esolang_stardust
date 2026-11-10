@@ -290,6 +290,8 @@ pub fn inst_meta(inst: &Instruction) -> &InstrMeta {
         Instruction::NumIn(m) => m,
         Instruction::CharOut(m) => m,
         Instruction::CharIn(m) => m,
+        Instruction::FileRead(m) => m,
+        Instruction::FileWrite(m) => m,
         Instruction::Mark { meta: m, .. } => m,
         Instruction::Jump { meta: m, .. } => m,
         Instruction::UnconditionalJump { meta: m, .. } => m,

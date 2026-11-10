@@ -50,7 +50,7 @@ impl ErrorKind {
                 format!("invalid number of spaces ({}) for '.' instruction (must be 0 or 1)", spaces)
             }
             ErrorKind::InvalidSpacesForComma { spaces } => {
-                format!("invalid number of spaces ({}) for ',' instruction (must be 0 or 1)", spaces)
+                format!("invalid number of spaces ({}) for ',' instruction (must be 0-3)", spaces)
             }
             ErrorKind::InvalidSpacesForEquals { spaces } => {
                 format!("invalid number of spaces ({}) for '=' instruction (must be 0-5)", spaces)

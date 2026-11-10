@@ -110,6 +110,8 @@ fn parse_one(input: &str) -> Result<(Instruction, &str), ParseReplError> {
         "Reverse" => Ok((Instruction::Reverse(meta), rest)),
         "CharOut" => Ok((Instruction::CharOut(meta), rest)),
         "CharIn" => Ok((Instruction::CharIn(meta), rest)),
+        "FileRead" => Ok((Instruction::FileRead(meta), rest)),
+        "FileWrite" => Ok((Instruction::FileWrite(meta), rest)),
         "NumOut" => Ok((Instruction::NumOut(meta), rest)),
         "NumIn" => Ok((Instruction::NumIn(meta), rest)),
         "Eq" => Ok((Instruction::Eq(meta), rest)),
