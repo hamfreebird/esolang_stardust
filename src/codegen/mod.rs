@@ -21,6 +21,7 @@ pub mod intrinsics;
 pub mod optimizer;
 
 use crate::stardust::ParseResult;
+use crate::stardust::config::CharMode;
 use std::path::Path;
 use std::process::Command;
 use std::{fs, io};
@@ -43,6 +44,8 @@ pub struct CodeGenConfig {
     pub optimization: u8, // 0-3
     /// 是否保留中间文件
     pub keep_temp: bool,
+    /// 字符输出模式（与解释器的 `#[char_mode]` 一致）
+    pub char_mode: CharMode,
 }
 
 impl Default for CodeGenConfig {
@@ -53,6 +56,7 @@ impl Default for CodeGenConfig {
             max_call_depth: DEFAULT_MAX_CALL_DEPTH,
             optimization: 0,
             keep_temp: false,
+            char_mode: CharMode::Ascii,
         }
     }
 }

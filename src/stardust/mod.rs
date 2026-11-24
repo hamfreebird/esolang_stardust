@@ -61,10 +61,10 @@ pub enum Instruction {
     NumIn(InstrMeta),                                   // 1 .
     CharOut(InstrMeta),                                 // 0 ,
     CharIn(InstrMeta),                                  // 1 ,
-    FileRead(InstrMeta),                                // 2 ,  读取文件：栈 [path chars..., len] -> [contents chars..., len]
-    FileWrite(InstrMeta),                               // 3 ,  写入文件：栈 [path chars..., len, data chars..., len]
-    Mark { name: usize, meta: InstrMeta },              // (n) `
-    Jump { name: usize, meta: InstrMeta },              // (n) '
+    FileRead(InstrMeta), // 2 ,  读取文件：栈 [path chars..., len] -> [contents chars..., len]
+    FileWrite(InstrMeta), // 3 ,  写入文件：栈 [path chars..., len, data chars..., len]
+    Mark { name: usize, meta: InstrMeta }, // (n) `
+    Jump { name: usize, meta: InstrMeta }, // (n) '
     Call { name: usize, argc: usize, meta: InstrMeta }, // (n1) : (n2) ;
     // 危险操作
     UnconditionalJump { name: usize, meta: InstrMeta }, // (n) ~

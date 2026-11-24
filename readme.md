@@ -178,6 +178,9 @@ stardust --build hello.sd
 
 编译器实现**编译期栈追踪**：基本块内将栈操作映射到 SSA 寄存器（零栈内存访问），控制流边界才 flush 到内存。包含**三阶段 Stardust IR 优化器**（常量折叠、死代码消除、窥孔优化）。
 
+LLVM 后端会读取 `#[char_mode=unicode]` 注解：`CharOut` 按 UTF-8 编码输出（1-4 字节），
+非法码点/代理项会报错；未声明时保持 ASCII 模式。`CharIn` 仍按字节读取。
+
 需要系统安装 `clang`（`llc` + `clang`）。
 
 ### 模式五：文本 → Stardust 源码

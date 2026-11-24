@@ -6,6 +6,7 @@
 //! - 控制流边界（Jump/Mark/Call）flush 到 @stack 内存，下一 BB 再从 @stack 读取
 //! - 函数调用通过帧基址（frame_base）实现多值返回语义
 
+use crate::stardust::config::CharMode;
 use crate::stardust::{Instruction, ParseResult};
 use std::collections::HashMap;
 
@@ -503,20 +504,34 @@ impl<'a> FuncCompiler<'a> {
 
     fn compile_charout(&mut self) {
         let val = self.pop_ssa();
-        let l = self.next_label();
         let val_str = val.to_llvm();
-
-        // Bounds check: 0 <= val <= 127
-        self.emitln(&format!("  %ch_ok_low_{l} = icmp sge i64 {v}, 0", v = val_str, l = l));
-        self.emitln(&format!("  %ch_ok_high_{l} = icmp sle i64 {v}, 127", v = val_str, l = l));
-        self.emitln(&format!("  %ch_ok_{l} = and i1 %ch_ok_low_{l}, %ch_ok_high_{l}"));
-        self.emitln(&format!("  br i1 %ch_ok_{l}, label %ch_put_{l}, label %ch_bad_{l}"));
-        self.emit_label(&format!("ch_bad_{l}"));
-        self.emitln(&format!("  call void @runtime_bad_ascii(i64 {v})", v = val_str));
-        self.emitln("  unreachable");
-        self.emit_label(&format!("ch_put_{l}"));
-        self.emitln(&format!("  %ch_trunc_{l} = trunc i64 {v} to i32", v = val_str));
-        self.emitln(&format!("  %ch_call_{l} = call i32 @putchar(i32 %ch_trunc_{l})", l = l));
+        match &self.config.char_mode {
+            CharMode::Ascii => {
+                let l = self.next_label();
+                // Bounds check: 0 <= val <= 127
+                self.emitln(&format!("  %ch_ok_low_{l} = icmp sge i64 {v}, 0", v = val_str, l = l));
+                self.emitln(&format!(
+                    "  %ch_ok_high_{l} = icmp sle i64 {v}, 127",
+                    v = val_str,
+                    l = l
+                ));
+                self.emitln(&format!("  %ch_ok_{l} = and i1 %ch_ok_low_{l}, %ch_ok_high_{l}"));
+                self.emitln(&format!("  br i1 %ch_ok_{l}, label %ch_put_{l}, label %ch_bad_{l}"));
+                self.emit_label(&format!("ch_bad_{l}"));
+                self.emitln(&format!("  call void @runtime_bad_ascii(i64 {v})", v = val_str));
+                self.emitln("  unreachable");
+                self.emit_label(&format!("ch_put_{l}"));
+                self.emitln(&format!("  %ch_trunc_{l} = trunc i64 {v} to i32", v = val_str));
+                self.emitln(&format!(
+                    "  %ch_call_{l} = call i32 @putchar(i32 %ch_trunc_{l})",
+                    l = l
+                ));
+            }
+            CharMode::Unicode => {
+                // 运行时负责校验码点并编码为 UTF-8（1-4 字节）。
+                self.emitln(&format!("  call void @runtime_char_out_utf8(i64 {v})", v = val_str));
+            }
+        }
     }
 
     // ── CharIn ─────────────────────────────────────────────
@@ -1283,6 +1298,22 @@ mod tests {
         let tokens = tokenize(source).unwrap();
         let parsed = parse_program(tokens).unwrap();
         compile_to_ir(&parsed, &default_config())
+    }
+
+    fn compile_source_with_config(source: &str, config: &CodeGenConfig) -> String {
+        let tokens = tokenize(source).unwrap();
+        let parsed = parse_program(tokens).unwrap();
+        compile_to_ir(&parsed, config)
+    }
+
+    #[test]
+    fn compile_charout_unicode_uses_utf8_runtime() {
+        let config = CodeGenConfig { char_mode: CharMode::Unicode, ..CodeGenConfig::default() };
+        // Push(233) + CharOut（233 = é）
+        let source = format!("{}+,\n", " ".repeat(238));
+        let ir = compile_source_with_config(&source, &config);
+        assert!(ir.contains("runtime_char_out_utf8"), "unicode CharOut should use UTF-8 runtime");
+        assert!(!ir.contains("%ch_ok_low_"), "unicode CharOut should skip ASCII bounds check");
     }
 
     #[test]

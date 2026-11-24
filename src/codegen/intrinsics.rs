@@ -23,6 +23,7 @@ pub const INTRINSICS_IR: &str = r#"
 @err_calldepth  = private constant [21 x i8] c"call depth exceeded\0A\00"
 @err_heap_oob   = private constant [22 x i8] c"heap address %ld OOB\0A\00"
 @err_io         = private constant [19 x i8] c"stdin read failed\0A\00"
+@err_badunicode = private constant [23 x i8] c"character %ld invalid\0A\00"
 
 define internal void @runtime_overflow() {
   %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([18 x i8], [18 x i8]* @err_overflow, i32 0, i32 0))
@@ -70,6 +71,99 @@ define internal void @runtime_io_error() {
   %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([19 x i8], [19 x i8]* @err_io, i32 0, i32 0))
   call void @exit(i64 1)
   unreachable
+}
+
+; ═══════════════════════════════════════════════════════════════
+; Unicode / UTF-8 字符输出
+; ═══════════════════════════════════════════════════════════════
+
+define internal void @runtime_bad_unicode(i64 %val) {
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([23 x i8], [23 x i8]* @err_badunicode, i32 0, i32 0), i64 %val)
+  call void @exit(i64 1)
+  unreachable
+}
+
+define internal void @runtime_char_out_utf8(i64 %cp) {
+entry:
+  %low = icmp sge i64 %cp, 0
+  %high = icmp sle i64 %cp, 1114111
+  %ok = and i1 %low, %high
+  br i1 %ok, label %surrogate_check, label %bad
+
+surrogate_check:
+  %s_low = icmp sge i64 %cp, 55296
+  %s_high = icmp sle i64 %cp, 57343
+  %surrogate = and i1 %s_low, %s_high
+  br i1 %surrogate, label %bad, label %dispatch
+
+bad:
+  call void @runtime_bad_unicode(i64 %cp)
+  unreachable
+
+dispatch:
+  %is_ascii = icmp slt i64 %cp, 128
+  br i1 %is_ascii, label %ascii, label %two_check
+
+ascii:
+  %ascii32 = trunc i64 %cp to i32
+  %r0 = call i32 @putchar(i32 %ascii32)
+  ret void
+
+two_check:
+  %is_two = icmp slt i64 %cp, 2048
+  br i1 %is_two, label %two, label %three_check
+
+two:
+  %b0s = lshr i64 %cp, 6
+  %b0o = or i64 %b0s, 192
+  %b0 = trunc i64 %b0o to i32
+  %r1 = call i32 @putchar(i32 %b0)
+  %b1m = and i64 %cp, 63
+  %b1o = or i64 %b1m, 128
+  %b1 = trunc i64 %b1o to i32
+  %r2 = call i32 @putchar(i32 %b1)
+  ret void
+
+three_check:
+  %is_three = icmp slt i64 %cp, 65536
+  br i1 %is_three, label %three, label %four
+
+three:
+  %b0s3 = lshr i64 %cp, 12
+  %b0o3 = or i64 %b0s3, 224
+  %b0_3 = trunc i64 %b0o3 to i32
+  %r3 = call i32 @putchar(i32 %b0_3)
+  %b1s3 = lshr i64 %cp, 6
+  %b1m3 = and i64 %b1s3, 63
+  %b1o3 = or i64 %b1m3, 128
+  %b1_3 = trunc i64 %b1o3 to i32
+  %r4 = call i32 @putchar(i32 %b1_3)
+  %b2m3 = and i64 %cp, 63
+  %b2o3 = or i64 %b2m3, 128
+  %b2_3 = trunc i64 %b2o3 to i32
+  %r5 = call i32 @putchar(i32 %b2_3)
+  ret void
+
+four:
+  %b0s4 = lshr i64 %cp, 18
+  %b0o4 = or i64 %b0s4, 240
+  %b0_4 = trunc i64 %b0o4 to i32
+  %r6 = call i32 @putchar(i32 %b0_4)
+  %b1s4 = lshr i64 %cp, 12
+  %b1m4 = and i64 %b1s4, 63
+  %b1o4 = or i64 %b1m4, 128
+  %b1_4 = trunc i64 %b1o4 to i32
+  %r7 = call i32 @putchar(i32 %b1_4)
+  %b2s4 = lshr i64 %cp, 6
+  %b2m4 = and i64 %b2s4, 63
+  %b2o4 = or i64 %b2m4, 128
+  %b2_4 = trunc i64 %b2o4 to i32
+  %r8 = call i32 @putchar(i32 %b2_4)
+  %b3m4 = and i64 %cp, 63
+  %b3o4 = or i64 %b3m4, 128
+  %b3_4 = trunc i64 %b3o4 to i32
+  %r9 = call i32 @putchar(i32 %b3_4)
+  ret void
 }
 
 ; ═══════════════════════════════════════════════════════════════

@@ -1,7 +1,7 @@
 use esolang_stardust::codegen::{self, CodeGenConfig};
 use esolang_stardust::extension::unwind::simple_preprocess;
 use esolang_stardust::repl;
-use esolang_stardust::stardust::config::parse_config;
+use esolang_stardust::stardust::config::{VmConfig, parse_config};
 use esolang_stardust::stardust::debugger::Debugger;
 use esolang_stardust::stardust::lexer::tokenize;
 use esolang_stardust::stardust::parser::parse_program;
@@ -189,9 +189,9 @@ fn cmd_compile(args: &[String]) {
     let input_file = &args[2];
     let output_file = args.get(3).map(|s| s.as_str());
 
-    let parse_result = parse_input_file(input_file);
+    let (parse_result, vm_config) = parse_input_file(input_file);
 
-    let config = CodeGenConfig::default();
+    let config = CodeGenConfig { char_mode: vm_config.char_mode, ..CodeGenConfig::default() };
     let ir = codegen::compile_to_ir(&parse_result, &config);
 
     let out_path = match output_file {
@@ -232,7 +232,7 @@ fn cmd_build(args: &[String]) {
         process::exit(1);
     }
 
-    let parse_result = parse_input_file(input_file);
+    let (parse_result, vm_config) = parse_input_file(input_file);
 
     let out_path = match output_file {
         Some(p) => std::path::PathBuf::from(p),
@@ -244,7 +244,7 @@ fn cmd_build(args: &[String]) {
         }
     };
 
-    let config = CodeGenConfig::default();
+    let config = CodeGenConfig { char_mode: vm_config.char_mode, ..CodeGenConfig::default() };
     match codegen::compile_to_exe(&parse_result, &out_path, &config) {
         Ok(()) => {
             println!("Binary compiled: {}", out_path.display());
@@ -260,7 +260,7 @@ fn cmd_build(args: &[String]) {
 ///
 /// 与 `cmd_run` 保持一致：先剥离 `#[key=value]` 注解，否则注解里的 `[`
 /// 会被词法分析器判为非法字符。
-fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
+fn parse_input_file(filename: &str) -> (esolang_stardust::stardust::ParseResult, VmConfig) {
     let source = match fs::read_to_string(filename) {
         Ok(content) => content,
         Err(e) => {
@@ -269,7 +269,7 @@ fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
         }
     };
 
-    let (_config, clean_source) = match parse_config(&source) {
+    let (config, clean_source) = match parse_config(&source) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Config error: {}", e);
@@ -294,7 +294,7 @@ fn parse_input_file(filename: &str) -> esolang_stardust::stardust::ParseResult {
     };
 
     match parse_program(tokens) {
-        Ok(prog) => prog,
+        Ok(prog) => (prog, config),
         Err(e) => {
             print_error(&e, &source, filename);
             process::exit(1);
