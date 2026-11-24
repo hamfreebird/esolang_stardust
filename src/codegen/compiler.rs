@@ -253,10 +253,8 @@ impl<'a> FuncCompiler<'a> {
             Instruction::NumIn(_) => self.compile_numin(),
             Instruction::CharOut(_) => self.compile_charout(),
             Instruction::CharIn(_) => self.compile_charin(),
-            Instruction::FileRead(_) | Instruction::FileWrite(_) => {
-                // LLVM 后端暂不提供文件 I/O 运行时；解释器后端支持。
-                self.emitln("  ; FileRead/FileWrite unsupported in LLVM backend");
-            }
+            Instruction::FileRead(_) => self.compile_file_read(),
+            Instruction::FileWrite(_) => self.compile_file_write(),
             Instruction::Mark { name, .. } => self.compile_mark(*name),
             Instruction::Jump { name, .. } => self.compile_jump(*name),
             Instruction::UnconditionalJump { name, .. } => self.compile_ujump(*name),
@@ -599,7 +597,23 @@ impl<'a> FuncCompiler<'a> {
         self.push_ssa(StackEntry::Reg(format!("%nin_val_{l}")));
     }
 
-    // ── Mark ───────────────────────────────────────────────
+    // ── FileRead / FileWrite ───────────────────────────────
+
+    /// FileRead：栈上 [path chars..., len] → [contents chars..., len]。
+    ///
+    /// 读到的内容长度在运行时才确定，无法用编译期栈模型表达，因此实现放在
+    /// 运行时函数里：它直接读写 `@stack`/`@sp`。调用前必须 flush 编译期栈，
+    /// 调用后编译期栈为空，后续 `pop` 自动回到从 `@stack` 加载的路径。
+    fn compile_file_read(&mut self) {
+        self.flush();
+        self.emitln("  call void @sd_file_read()");
+    }
+
+    /// FileWrite：栈上 [path chars..., len, data chars..., len] → []。
+    fn compile_file_write(&mut self) {
+        self.flush();
+        self.emitln("  call void @sd_file_write()");
+    }
 
     fn compile_mark(&mut self, name: usize) {
         // Flush before the mark (control flow may enter here from a jump)
@@ -1136,6 +1150,491 @@ impl<'a> FuncCompiler<'a> {
     }
 }
 
+// ── 文件 I/O 运行时 ──────────────────────────────────────────
+
+/// 文件 I/O 运行时（`FileRead` / `FileWrite` 的 LLVM 实现）。
+///
+/// 栈上的字符串表示与解释器一致：`[chars..., len]`，`@sp` 指向下一个空槽。
+/// 读取内容的长度只有运行时才知道，无法用编译期栈模型表达，所以这里直接生成
+/// 会改写 `@stack`/`@sp` 的运行时函数；编译器在调用它们之前会 flush 编译期栈。
+///
+/// 错误语义与解释器对齐：文件打不开、读写失败、内容不是合法 UTF-8、或栈空间
+/// 不足，都打印错误并以非零状态退出。
+fn file_io_runtime_ir(config: &CodeGenConfig) -> String {
+    let template = r#"
+; ═══════════════════════════════════════════════════════════════
+; 文件 I/O 运行时（FileRead / FileWrite）
+; ═══════════════════════════════════════════════════════════════
+@err_file_io   = private constant [17 x i8] c"file I/O failed\0A\00"
+@err_stack_ovf = private constant [16 x i8] c"stack overflow\0A\00"
+@sd_mode_rb    = private constant [3 x i8] c"rb\00"
+@sd_mode_wb    = private constant [3 x i8] c"wb\00"
+
+define internal void @sd_file_io_error() {
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([17 x i8], [17 x i8]* @err_file_io, i32 0, i32 0))
+  call void @exit(i64 1)
+  unreachable
+}
+
+define internal void @sd_stack_overflow() {
+  %msg = call i32 (i8*, ...) @printf(i8* getelementptr ([16 x i8], [16 x i8]* @err_stack_ovf, i32 0, i32 0))
+  call void @exit(i64 1)
+  unreachable
+}
+
+; 把码点编码为 UTF-8 写入 %buf，返回写入的字节数（1–4）。
+define internal i64 @sd_utf8_encode(i64 %cp, i8* %buf) {
+entry:
+  %is1 = icmp slt i64 %cp, 128
+  br i1 %is1, label %enc1, label %enc_chk2
+enc1:
+  %enc1_b = trunc i64 %cp to i8
+  store i8 %enc1_b, i8* %buf
+  ret i64 1
+enc_chk2:
+  %is2 = icmp slt i64 %cp, 2048
+  br i1 %is2, label %enc2, label %enc_chk3
+enc2:
+  %e2_b0s = lshr i64 %cp, 6
+  %e2_b0o = or i64 %e2_b0s, 192
+  %e2_b0t = trunc i64 %e2_b0o to i8
+  store i8 %e2_b0t, i8* %buf
+  %e2_p1 = getelementptr i8, i8* %buf, i64 1
+  %e2_b1m = and i64 %cp, 63
+  %e2_b1o = or i64 %e2_b1m, 128
+  %e2_b1t = trunc i64 %e2_b1o to i8
+  store i8 %e2_b1t, i8* %e2_p1
+  ret i64 2
+enc_chk3:
+  %is3 = icmp slt i64 %cp, 65536
+  br i1 %is3, label %enc3, label %enc4
+enc3:
+  %e3_b0s = lshr i64 %cp, 12
+  %e3_b0o = or i64 %e3_b0s, 224
+  %e3_b0t = trunc i64 %e3_b0o to i8
+  store i8 %e3_b0t, i8* %buf
+  %e3_p1 = getelementptr i8, i8* %buf, i64 1
+  %e3_b1s = lshr i64 %cp, 6
+  %e3_b1m = and i64 %e3_b1s, 63
+  %e3_b1o = or i64 %e3_b1m, 128
+  %e3_b1t = trunc i64 %e3_b1o to i8
+  store i8 %e3_b1t, i8* %e3_p1
+  %e3_p2 = getelementptr i8, i8* %buf, i64 2
+  %e3_b2m = and i64 %cp, 63
+  %e3_b2o = or i64 %e3_b2m, 128
+  %e3_b2t = trunc i64 %e3_b2o to i8
+  store i8 %e3_b2t, i8* %e3_p2
+  ret i64 3
+enc4:
+  %e4_b0s = lshr i64 %cp, 18
+  %e4_b0o = or i64 %e4_b0s, 240
+  %e4_b0t = trunc i64 %e4_b0o to i8
+  store i8 %e4_b0t, i8* %buf
+  %e4_p1 = getelementptr i8, i8* %buf, i64 1
+  %e4_b1s = lshr i64 %cp, 12
+  %e4_b1m = and i64 %e4_b1s, 63
+  %e4_b1o = or i64 %e4_b1m, 128
+  %e4_b1t = trunc i64 %e4_b1o to i8
+  store i8 %e4_b1t, i8* %e4_p1
+  %e4_p2 = getelementptr i8, i8* %buf, i64 2
+  %e4_b2s = lshr i64 %cp, 6
+  %e4_b2m = and i64 %e4_b2s, 63
+  %e4_b2o = or i64 %e4_b2m, 128
+  %e4_b2t = trunc i64 %e4_b2o to i8
+  store i8 %e4_b2t, i8* %e4_p2
+  %e4_p3 = getelementptr i8, i8* %buf, i64 3
+  %e4_b3m = and i64 %cp, 63
+  %e4_b3o = or i64 %e4_b3m, 128
+  %e4_b3t = trunc i64 %e4_b3o to i8
+  store i8 %e4_b3t, i8* %e4_p3
+  ret i64 4
+}
+
+; 从 %buf 的 %pos 处解码一个 UTF-8 码点写入 %out，返回消耗的字节数；
+; 返回 0 表示非法序列（与解释器的 UTF-8 校验对齐）。
+define internal i64 @sd_utf8_decode(i8* %buf, i64 %pos, i64 %size, i64* %out) {
+entry:
+  %d0p = getelementptr i8, i8* %buf, i64 %pos
+  %d0w = load i8, i8* %d0p
+  %d0 = zext i8 %d0w to i64
+  %d_is1 = icmp ult i64 %d0, 128
+  br i1 %d_is1, label %dec1, label %dec_chk2
+dec1:
+  store i64 %d0, i64* %out
+  ret i64 1
+dec_chk2:
+  %d1 = add i64 %pos, 1
+  %d1_ge = icmp uge i64 %d0, 194
+  %d1_le = icmp ule i64 %d0, 223
+  %d1_lead = and i1 %d1_ge, %d1_le
+  %d1_has = icmp slt i64 %d1, %size
+  %d1_ok = and i1 %d1_lead, %d1_has
+  br i1 %d1_ok, label %dec2, label %dec_chk3
+dec2:
+  %d2p = getelementptr i8, i8* %buf, i64 %d1
+  %d2w = load i8, i8* %d2p
+  %d2 = zext i8 %d2w to i64
+  %d2m = and i64 %d2, 192
+  %d2_cont = icmp eq i64 %d2m, 128
+  br i1 %d2_cont, label %dec2_ok, label %dec_bad
+dec2_ok:
+  %d2_l0 = and i64 %d0, 31
+  %d2_s0 = shl i64 %d2_l0, 6
+  %d2_l1 = and i64 %d2, 63
+  %d2_cp = or i64 %d2_s0, %d2_l1
+  store i64 %d2_cp, i64* %out
+  ret i64 2
+dec_chk3:
+  %d3i = add i64 %pos, 2
+  %d3_ge = icmp uge i64 %d0, 224
+  %d3_le = icmp ule i64 %d0, 239
+  %d3_lead = and i1 %d3_ge, %d3_le
+  %d3_has = icmp slt i64 %d3i, %size
+  %d3_ok = and i1 %d3_lead, %d3_has
+  br i1 %d3_ok, label %dec3, label %dec_chk4
+dec3:
+  %d3p1 = getelementptr i8, i8* %buf, i64 %d1
+  %d3w1 = load i8, i8* %d3p1
+  %d3c1 = zext i8 %d3w1 to i64
+  %d3p2 = getelementptr i8, i8* %buf, i64 %d3i
+  %d3w2 = load i8, i8* %d3p2
+  %d3c2 = zext i8 %d3w2 to i64
+  %d3m1 = and i64 %d3c1, 192
+  %d3k1 = icmp eq i64 %d3m1, 128
+  %d3m2 = and i64 %d3c2, 192
+  %d3k2 = icmp eq i64 %d3m2, 128
+  %d3_conts = and i1 %d3k1, %d3k2
+  ; 过长编码（E0 80..9F）与代理区（ED A0..BF）都视为非法
+  %d3_is_e0 = icmp eq i64 %d0, 224
+  %d3_c1_lt = icmp ult i64 %d3c1, 160
+  %d3_ovl = and i1 %d3_is_e0, %d3_c1_lt
+  %d3_is_ed = icmp eq i64 %d0, 237
+  %d3_c1_hi = icmp uge i64 %d3c1, 160
+  %d3_surr = and i1 %d3_is_ed, %d3_c1_hi
+  %d3_bad_range = or i1 %d3_ovl, %d3_surr
+  %d3_good_range = xor i1 %d3_bad_range, true
+  %d3_ok_range = and i1 %d3_conts, %d3_good_range
+  br i1 %d3_ok_range, label %dec3_ok, label %dec_bad
+dec3_ok:
+  %d3_l0 = and i64 %d0, 15
+  %d3_s0 = shl i64 %d3_l0, 12
+  %d3_l1 = and i64 %d3c1, 63
+  %d3_s1 = shl i64 %d3_l1, 6
+  %d3_l2 = and i64 %d3c2, 63
+  %d3_a = or i64 %d3_s0, %d3_s1
+  %d3_cp = or i64 %d3_a, %d3_l2
+  store i64 %d3_cp, i64* %out
+  ret i64 3
+dec_chk4:
+  %d4i = add i64 %pos, 3
+  %d4_ge = icmp uge i64 %d0, 240
+  %d4_le = icmp ule i64 %d0, 244
+  %d4_lead = and i1 %d4_ge, %d4_le
+  %d4_has = icmp slt i64 %d4i, %size
+  %d4_ok = and i1 %d4_lead, %d4_has
+  br i1 %d4_ok, label %dec4, label %dec_bad
+dec4:
+  %d4p1 = getelementptr i8, i8* %buf, i64 %d1
+  %d4w1 = load i8, i8* %d4p1
+  %d4c1 = zext i8 %d4w1 to i64
+  %d4p2 = getelementptr i8, i8* %buf, i64 %d3i
+  %d4w2 = load i8, i8* %d4p2
+  %d4c2 = zext i8 %d4w2 to i64
+  %d4p3 = getelementptr i8, i8* %buf, i64 %d4i
+  %d4w3 = load i8, i8* %d4p3
+  %d4c3 = zext i8 %d4w3 to i64
+  %d4m1 = and i64 %d4c1, 192
+  %d4k1 = icmp eq i64 %d4m1, 128
+  %d4m2 = and i64 %d4c2, 192
+  %d4k2 = icmp eq i64 %d4m2, 128
+  %d4m3 = and i64 %d4c3, 192
+  %d4k3 = icmp eq i64 %d4m3, 128
+  %d4_k12 = and i1 %d4k1, %d4k2
+  %d4_conts = and i1 %d4_k12, %d4k3
+  ; 过长编码（F0 80..8F）与超出 U+10FFFF（F4 90..）视为非法
+  %d4_is_f0 = icmp eq i64 %d0, 240
+  %d4_c1_lt = icmp ult i64 %d4c1, 144
+  %d4_ovl = and i1 %d4_is_f0, %d4_c1_lt
+  %d4_is_f4 = icmp eq i64 %d0, 244
+  %d4_c1_hi = icmp uge i64 %d4c1, 144
+  %d4_range = and i1 %d4_is_f4, %d4_c1_hi
+  %d4_bad_range = or i1 %d4_ovl, %d4_range
+  %d4_good_range = xor i1 %d4_bad_range, true
+  %d4_ok_range = and i1 %d4_conts, %d4_good_range
+  br i1 %d4_ok_range, label %dec4_ok, label %dec_bad
+dec4_ok:
+  %d4_l0 = and i64 %d0, 7
+  %d4_s0 = shl i64 %d4_l0, 18
+  %d4_l1 = and i64 %d4c1, 63
+  %d4_s1 = shl i64 %d4_l1, 12
+  %d4_l2 = and i64 %d4c2, 63
+  %d4_s2 = shl i64 %d4_l2, 6
+  %d4_l3 = and i64 %d4c3, 63
+  %d4_a = or i64 %d4_s0, %d4_s1
+  %d4_b = or i64 %d4_a, %d4_s2
+  %d4_cp = or i64 %d4_b, %d4_l3
+  store i64 %d4_cp, i64* %out
+  ret i64 4
+dec_bad:
+  ret i64 0
+}
+
+; FileRead：栈上 [path chars..., len] → [contents chars..., len]
+define internal void @sd_file_read() {
+entry:
+  %rd_cp = alloca i64
+  %rd_sp = load i64, i64* @sp
+  %rd_fdd = load i32, i32* @frame_depth
+  %rd_fdi = sub i32 %rd_fdd, 1
+  %rd_fbp = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %rd_fdi
+  %rd_fb = load i64, i64* %rd_fbp
+  %rd_has = icmp sgt i64 %rd_sp, %rd_fb
+  br i1 %rd_has, label %pop_len, label %rd_underflow
+pop_len:
+  %rd_li = sub i64 %rd_sp, 1
+  %rd_lp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %rd_li
+  %rd_plen = load i64, i64* %rd_lp
+  %rd_len_ok = icmp sge i64 %rd_plen, 0
+  %rd_pstart = sub i64 %rd_li, %rd_plen
+  %rd_room = icmp sge i64 %rd_pstart, %rd_fb
+  %rd_ok = and i1 %rd_len_ok, %rd_room
+  br i1 %rd_ok, label %alloc_path, label %rd_underflow
+alloc_path:
+  %rd_pmul = mul i64 %rd_plen, 4
+  %rd_pbytes = add i64 %rd_pmul, 1
+  %rd_path = call i8* @malloc(i64 %rd_pbytes)
+  %rd_path_null = icmp eq i8* %rd_path, null
+  br i1 %rd_path_null, label %rd_io, label %enc_path
+enc_path:
+  br label %enc_path_check
+enc_path_check:
+  %rd_ei = phi i64 [ 0, %enc_path ], [ %rd_ei_next, %enc_path_step ]
+  %rd_ecp = phi i64 [ %rd_pstart, %enc_path ], [ %rd_ecp_next, %enc_path_step ]
+  %rd_eb = phi i64 [ 0, %enc_path ], [ %rd_eb_next, %enc_path_step ]
+  %rd_enc_done = icmp eq i64 %rd_ei, %rd_plen
+  br i1 %rd_enc_done, label %enc_path_done, label %enc_path_body
+enc_path_body:
+  %rd_ecpp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %rd_ecp
+  %rd_ecpv = load i64, i64* %rd_ecpp
+  %rd_edst = getelementptr i8, i8* %rd_path, i64 %rd_eb
+  %rd_en = call i64 @sd_utf8_encode(i64 %rd_ecpv, i8* %rd_edst)
+  %rd_ei_next = add i64 %rd_ei, 1
+  %rd_ecp_next = add i64 %rd_ecp, 1
+  %rd_eb_next = add i64 %rd_eb, %rd_en
+  br label %enc_path_step
+enc_path_step:
+  br label %enc_path_check
+enc_path_done:
+  %rd_nul = getelementptr i8, i8* %rd_path, i64 %rd_eb
+  store i8 0, i8* %rd_nul
+  %rd_rb = getelementptr [3 x i8], [3 x i8]* @sd_mode_rb, i32 0, i32 0
+  %rd_fp = call i8* @fopen(i8* %rd_path, i8* %rd_rb)
+  %rd_fp_null = icmp eq i8* %rd_fp, null
+  br i1 %rd_fp_null, label %rd_io_path, label %seek_end
+seek_end:
+  %rd_s1 = call i32 @fseek(i8* %rd_fp, i64 0, i32 2)
+  %rd_size = call i64 @ftell(i8* %rd_fp)
+  %rd_size_ok = icmp sge i64 %rd_size, 0
+  br i1 %rd_size_ok, label %rewind, label %rd_io_handle
+rewind:
+  %rd_s2 = call i32 @fseek(i8* %rd_fp, i64 0, i32 0)
+  %rd_s2_ok = icmp eq i32 %rd_s2, 0
+  br i1 %rd_s2_ok, label %alloc_data, label %rd_io_handle
+alloc_data:
+  %rd_dn = add i64 %rd_size, 1
+  %rd_data = call i8* @malloc(i64 %rd_dn)
+  %rd_data_null = icmp eq i8* %rd_data, null
+  br i1 %rd_data_null, label %rd_io_handle, label %do_read
+do_read:
+  %rd_read = call i64 @fread(i8* %rd_data, i64 1, i64 %rd_size, i8* %rd_fp)
+  %rd_close = call i32 @fclose(i8* %rd_fp)
+  %rd_read_ok = icmp eq i64 %rd_read, %rd_size
+  br i1 %rd_read_ok, label %decode, label %rd_io_data
+decode:
+  call void @free(i8* %rd_path)
+  br label %decode_check
+decode_check:
+  %rd_di = phi i64 [ 0, %decode ], [ %rd_di_next, %decode_step ]
+  %rd_dc = phi i64 [ 0, %decode ], [ %rd_dc_next, %decode_step ]
+  %rd_decode_done = icmp eq i64 %rd_di, %rd_size
+  br i1 %rd_decode_done, label %decode_done, label %decode_body
+decode_body:
+  %rd_wpos = add i64 %rd_pstart, %rd_dc
+  %rd_cap_ok = icmp slt i64 %rd_wpos, {SSZ}
+  br i1 %rd_cap_ok, label %decode_call, label %rd_overflow
+decode_call:
+  %rd_adv = call i64 @sd_utf8_decode(i8* %rd_data, i64 %rd_di, i64 %rd_size, i64* %rd_cp)
+  %rd_adv_zero = icmp eq i64 %rd_adv, 0
+  br i1 %rd_adv_zero, label %rd_io_data, label %decode_store
+decode_store:
+  %rd_cpv = load i64, i64* %rd_cp
+  %rd_wptr = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %rd_wpos
+  store i64 %rd_cpv, i64* %rd_wptr
+  %rd_di_next = add i64 %rd_di, %rd_adv
+  %rd_dc_next = add i64 %rd_dc, 1
+  br label %decode_step
+decode_step:
+  br label %decode_check
+decode_done:
+  %rd_end = add i64 %rd_pstart, %rd_dc
+  %rd_len_room = icmp slt i64 %rd_end, {SSZ}
+  br i1 %rd_len_room, label %push_len, label %rd_overflow_data
+push_len:
+  %rd_lptr = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %rd_end
+  store i64 %rd_dc, i64* %rd_lptr
+  %rd_sp_new = add i64 %rd_end, 1
+  store i64 %rd_sp_new, i64* @sp
+  call void @free(i8* %rd_data)
+  ret void
+rd_underflow:
+  call void @runtime_stack_underflow()
+  unreachable
+rd_overflow:
+  call void @free(i8* %rd_data)
+  call void @sd_stack_overflow()
+  unreachable
+rd_overflow_data:
+  call void @free(i8* %rd_data)
+  call void @sd_stack_overflow()
+  unreachable
+rd_io:
+  call void @sd_file_io_error()
+  unreachable
+rd_io_path:
+  call void @free(i8* %rd_path)
+  call void @sd_file_io_error()
+  unreachable
+rd_io_handle:
+  call void @fclose(i8* %rd_fp)
+  call void @free(i8* %rd_path)
+  call void @sd_file_io_error()
+  unreachable
+rd_io_data:
+  call void @free(i8* %rd_data)
+  call void @sd_file_io_error()
+  unreachable
+}
+
+; FileWrite：栈上 [path chars..., len, data chars..., len] → []
+define internal void @sd_file_write() {
+entry:
+  %wr_sp = load i64, i64* @sp
+  %wr_fdd = load i32, i32* @frame_depth
+  %wr_fdi = sub i32 %wr_fdd, 1
+  %wr_fbp = getelementptr [{MD} x i64], [{MD} x i64]* @frame_base_stack, i32 0, i32 %wr_fdi
+  %wr_fb = load i64, i64* %wr_fbp
+  %wr_has = icmp sgt i64 %wr_sp, %wr_fb
+  br i1 %wr_has, label %wr_pop_data, label %wr_underflow
+wr_pop_data:
+  %wr_dli = sub i64 %wr_sp, 1
+  %wr_dlp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %wr_dli
+  %wr_dlen = load i64, i64* %wr_dlp
+  %wr_dlen_ok = icmp sge i64 %wr_dlen, 0
+  %wr_dstart = sub i64 %wr_dli, %wr_dlen
+  %wr_droom = icmp sge i64 %wr_dstart, %wr_fb
+  %wr_dok = and i1 %wr_dlen_ok, %wr_droom
+  br i1 %wr_dok, label %wr_pop_path, label %wr_underflow
+wr_pop_path:
+  %wr_pli = sub i64 %wr_dstart, 1
+  %wr_has_plen = icmp sge i64 %wr_pli, %wr_fb
+  br i1 %wr_has_plen, label %wr_read_plen, label %wr_underflow
+wr_read_plen:
+  %wr_plp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %wr_pli
+  %wr_plen = load i64, i64* %wr_plp
+  %wr_plen_ok = icmp sge i64 %wr_plen, 0
+  %wr_pstart = sub i64 %wr_pli, %wr_plen
+  %wr_pok = icmp sge i64 %wr_pstart, %wr_fb
+  %wr_path_ok = and i1 %wr_plen_ok, %wr_pok
+  br i1 %wr_path_ok, label %wr_alloc_path, label %wr_underflow
+wr_alloc_path:
+  %wr_pmul = mul i64 %wr_plen, 4
+  %wr_pbytes = add i64 %wr_pmul, 1
+  %wr_path = call i8* @malloc(i64 %wr_pbytes)
+  %wr_path_null = icmp eq i8* %wr_path, null
+  br i1 %wr_path_null, label %wr_io, label %wr_enc_path
+wr_enc_path:
+  br label %wr_enc_check
+wr_enc_check:
+  %wr_ei = phi i64 [ 0, %wr_enc_path ], [ %wr_ei_next, %wr_enc_step ]
+  %wr_ecp = phi i64 [ %wr_pstart, %wr_enc_path ], [ %wr_ecp_next, %wr_enc_step ]
+  %wr_eb = phi i64 [ 0, %wr_enc_path ], [ %wr_eb_next, %wr_enc_step ]
+  %wr_enc_done = icmp eq i64 %wr_ei, %wr_plen
+  br i1 %wr_enc_done, label %wr_enc_done_blk, label %wr_enc_body
+wr_enc_body:
+  %wr_ecpp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %wr_ecp
+  %wr_ecpv = load i64, i64* %wr_ecpp
+  %wr_edst = getelementptr i8, i8* %wr_path, i64 %wr_eb
+  %wr_en = call i64 @sd_utf8_encode(i64 %wr_ecpv, i8* %wr_edst)
+  %wr_ei_next = add i64 %wr_ei, 1
+  %wr_ecp_next = add i64 %wr_ecp, 1
+  %wr_eb_next = add i64 %wr_eb, %wr_en
+  br label %wr_enc_step
+wr_enc_step:
+  br label %wr_enc_check
+wr_enc_done_blk:
+  %wr_nul = getelementptr i8, i8* %wr_path, i64 %wr_eb
+  store i8 0, i8* %wr_nul
+  %wr_wb = getelementptr [3 x i8], [3 x i8]* @sd_mode_wb, i32 0, i32 0
+  %wr_fp = call i8* @fopen(i8* %wr_path, i8* %wr_wb)
+  %wr_fp_null = icmp eq i8* %wr_fp, null
+  br i1 %wr_fp_null, label %wr_io_path, label %wr_alloc_data
+wr_alloc_data:
+  %wr_dmul = mul i64 %wr_dlen, 4
+  %wr_dbytes = add i64 %wr_dmul, 1
+  %wr_data = call i8* @malloc(i64 %wr_dbytes)
+  %wr_data_null = icmp eq i8* %wr_data, null
+  br i1 %wr_data_null, label %wr_io_handle, label %wr_enc_data
+wr_enc_data:
+  br label %wr_dcheck
+wr_dcheck:
+  %wr_di = phi i64 [ 0, %wr_enc_data ], [ %wr_di_next, %wr_dstep ]
+  %wr_dcp = phi i64 [ %wr_dstart, %wr_enc_data ], [ %wr_dcp_next, %wr_dstep ]
+  %wr_db = phi i64 [ 0, %wr_enc_data ], [ %wr_db_next, %wr_dstep ]
+  %wr_d_done = icmp eq i64 %wr_di, %wr_dlen
+  br i1 %wr_d_done, label %wr_done_blk, label %wr_dbody
+wr_dbody:
+  %wr_dcpp = getelementptr [{SSZ} x i64], [{SSZ} x i64]* @stack, i32 0, i64 %wr_dcp
+  %wr_dcpv = load i64, i64* %wr_dcpp
+  %wr_ddst = getelementptr i8, i8* %wr_data, i64 %wr_db
+  %wr_dn = call i64 @sd_utf8_encode(i64 %wr_dcpv, i8* %wr_ddst)
+  %wr_di_next = add i64 %wr_di, 1
+  %wr_dcp_next = add i64 %wr_dcp, 1
+  %wr_db_next = add i64 %wr_db, %wr_dn
+  br label %wr_dstep
+wr_dstep:
+  br label %wr_dcheck
+wr_done_blk:
+  %wr_written = call i64 @fwrite(i8* %wr_data, i64 1, i64 %wr_db, i8* %wr_fp)
+  %wr_close = call i32 @fclose(i8* %wr_fp)
+  store i64 %wr_pstart, i64* @sp
+  call void @free(i8* %wr_data)
+  call void @free(i8* %wr_path)
+  %wr_write_ok = icmp eq i64 %wr_written, %wr_db
+  br i1 %wr_write_ok, label %wr_done, label %wr_io
+wr_done:
+  ret void
+wr_underflow:
+  call void @runtime_stack_underflow()
+  unreachable
+wr_io:
+  call void @sd_file_io_error()
+  unreachable
+wr_io_path:
+  call void @free(i8* %wr_path)
+  call void @sd_file_io_error()
+  unreachable
+wr_io_handle:
+  call void @fclose(i8* %wr_fp)
+  call void @free(i8* %wr_path)
+  call void @sd_file_io_error()
+  unreachable
+}
+"#;
+    template
+        .replace("{SSZ}", &config.stack_size.to_string())
+        .replace("{MD}", &config.max_call_depth.to_string())
+}
+
 // ── 公开 API ──────────────────────────────────────────────────
 
 /// 将 ParseResult 编译为 LLVM IR 文本。
@@ -1217,6 +1716,9 @@ ret_n:
 
     // ── 运行时内建函数 ──
     out.push_str(INTRINSICS_IR);
+
+    // ── 文件 I/O 运行时（需要栈/帧参数，故以配置参数化生成）──
+    out.push_str(&file_io_runtime_ir(config));
 
     // ── 编译 Stardust 函数 ──
     for (name, func_def) in &funcs_opt {

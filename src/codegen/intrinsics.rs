@@ -223,6 +223,14 @@ declare i8* @malloc(i64)
 declare void @free(i8*)
 declare void @exit(i64)
 
+; ── 文件 I/O（FileRead/FileWrite 运行时）──────────────────────
+declare i8* @fopen(i8*, i8*)
+declare i32 @fclose(i8*)
+declare i64 @fread(i8*, i64, i64, i8*)
+declare i64 @fwrite(i8*, i64, i64, i8*)
+declare i32 @fseek(i8*, i64, i32)
+declare i64 @ftell(i8*)
+
 ; ── I/O 格式字符串 ────────────────────────────────────────────
 @fmt_numout  = private constant [4 x i8] c"%ld\00"
 @fmt_numout_nl = private constant [5 x i8] c"%ld\0A\00"

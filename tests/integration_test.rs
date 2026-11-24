@@ -127,6 +127,25 @@ fn dump_stack() -> String {
     "#".to_string()
 }
 
+// 文件 I/O
+/// FileRead → ',' 前 2 个空格
+fn file_read() -> String {
+    "  ,".to_string()
+}
+/// FileWrite → ',' 前 3 个空格
+fn file_write() -> String {
+    "   ,".to_string()
+}
+/// 把字符串压栈：每个字符 Push + 字符数 Push（解释器/编译器的字符串约定）
+fn push_string(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        out.push_str(&push(ch as i64));
+    }
+    out.push_str(&push(s.chars().count() as i64));
+    out
+}
+
 /// 辅助函数：运行完整流水线
 fn run(source: &str) -> Result<(), StardustError> {
     let tokens = tokenize(source)?;
@@ -1273,6 +1292,75 @@ mod codegen_tests {
         let content = std::fs::read_to_string(&tmp).unwrap();
         assert!(content.contains("putchar"));
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// 文件 I/O：解释器与 LLVM 后端对 FileWrite/FileRead 的行为应一致。
+    ///
+    /// 写入含非 ASCII 的内容，读回后再写到第二个文件；两端产物逐字节比较。
+    #[test]
+    fn compile_file_io_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("sd_fileio_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src_file = dir.join("in.txt");
+        let interp_out = dir.join("interp.txt");
+        let llvm_out = dir.join("llvm.txt");
+        let text = "héllo 文件 I/O\n";
+        std::fs::write(&src_file, text).unwrap();
+
+        // FileWrite 需要 [path…, plen, data…, dlen]
+        let write_and_read = |out: &std::path::Path| {
+            format!(
+                "{}{}{}{}",
+                push_string(out.to_str().unwrap()),
+                push_string(src_file.to_str().unwrap()),
+                file_read(),
+                file_write(),
+            )
+        };
+
+        // 1) 解释器
+        let _ = std::fs::remove_file(&interp_out);
+        run(&write_and_read(&interp_out)).expect("interpreter file I/O should succeed");
+        assert_eq!(
+            std::fs::read(&interp_out).unwrap(),
+            text.as_bytes(),
+            "interpreter should copy file contents"
+        );
+
+        // 2) LLVM 后端
+        let _ = std::fs::remove_file(&llvm_out);
+        let ir = compile_src_to_ir(&write_and_read(&llvm_out));
+        assert!(ir.contains("call void @sd_file_read()"), "FileRead should call the runtime");
+        assert!(ir.contains("call void @sd_file_write()"), "FileWrite should call the runtime");
+        if let Some((_stdout, stderr, code)) = compile_and_run(&ir) {
+            assert_eq!(code, 0, "compiled file I/O should exit 0, stderr={stderr}");
+            assert_eq!(
+                std::fs::read(&llvm_out).unwrap(),
+                std::fs::read(&interp_out).unwrap(),
+                "LLVM backend should match the interpreter byte for byte"
+            );
+        }
+
+        let _ = std::fs::remove_file(&interp_out);
+        let _ = std::fs::remove_file(&llvm_out);
+        let _ = std::fs::remove_file(&src_file);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// 读不存在的文件在 LLVM 后端应报 I/O 错误并以非零状态退出。
+    #[test]
+    fn compile_file_read_missing_file_fails() {
+        let missing = std::env::temp_dir().join(format!("sd_missing_{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&missing);
+        let src = format!("{}{}", push_string(missing.to_str().unwrap()), file_read());
+        let ir = compile_src_to_ir(&src);
+        if let Some((stdout, _stderr, code)) = compile_and_run(&ir) {
+            assert_ne!(code, 0, "reading a missing file should fail");
+            assert!(
+                stdout.contains("file I/O failed"),
+                "should report file I/O failure (runtime errors print to stdout): {stdout}"
+            );
+        }
     }
 
     /// 把 IR 交给 clang 做完整解析+代码生成（`-c -o /dev/null`），验证 IR 合法。
